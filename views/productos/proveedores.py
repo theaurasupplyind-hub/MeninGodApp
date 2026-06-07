@@ -1,0 +1,488 @@
+"""
+productos/proveedores.py
+Gestión de proveedores con cuenta corriente.
+"""
+import logging
+log = logging.getLogger("mvp10")
+
+import flet as ft
+from theme import get_theme
+
+from db.database import (
+    get_proveedores, save_proveedor, update_proveedor, delete_proveedor,
+    get_resumen_proveedores, get_movimientos_proveedor, registrar_movimiento_proveedor,
+)
+
+
+def _fmt_saldo(val: float) -> str:
+    try:
+        v = float(val)
+        signo = "-" if v < 0 else ""
+        return f"{signo}${abs(int(v)):,}".replace(",", ".")
+    except Exception:
+        return "$0"
+
+
+from views.flow_guide import HelpButton
+
+def ProveedoresView(page: ft.Page, on_switch_tab=None):
+    t = get_theme(page)
+    search_filter: dict[str, str] = {"value": ""}
+    selected_id: dict[str, int | None] = {"value": None}
+
+    def _show_message(text: str, color=t["accent"]):
+        page.open(ft.SnackBar(ft.Text(text, color=ft.colors.WHITE), bgcolor=color, duration=3200))
+
+    def _tf(hint, width=None):
+        return ft.TextField(
+            hint_text=hint,
+            border_radius=7, height=38, text_size=13,
+            content_padding=ft.padding.symmetric(8, 10),
+            width=width,
+            border_color=t["border"],
+            focused_border_color=t["accent"], bgcolor=t["bg_input"], color=t["text_primary"],
+        )
+
+    right_panel = ft.Container(expand=True)
+
+    def _render_empty_panel():
+        right_panel.content = ft.Container(
+            content=ft.Column(
+                [
+                    ft.Icon(ft.icons.PEOPLE_OUTLINE, size=48, color=t["border"]),
+                    ft.Text("Seleccioná un proveedor", size=15, color=t["text_hint"]),
+                ],
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=12,
+            ),
+            alignment=ft.Alignment(0, 0),
+            expand=True,
+        )
+        if right_panel.page:
+            right_panel.update()
+
+    def _render_panel(proveedor: dict):
+        selected_id["value"] = proveedor["id"]
+        movimientos = get_movimientos_proveedor(proveedor["id"])
+        saldo = sum(m.get("debe", 0) - m.get("haber", 0) for m in movimientos)
+        saldo_color = ft.colors.ERROR if saldo > 0 else (
+            ft.colors.GREEN_700 if saldo < 0 else t["text_secondary"]
+        )
+
+        tf_nombre    = _tf("Nombre")
+        tf_domicilio = _tf("Domicilio")
+        tf_telefono  = _tf("Teléfono")
+        
+        tf_nombre.value    = proveedor.get("nombre", "")
+        tf_domicilio.value = proveedor.get("domicilio", "")
+        tf_telefono.value  = proveedor.get("telefono", "")
+
+        editando = {"value": False}
+        form_col = ft.Column(
+            [
+                ft.Text("Nombre *", size=12, color=t["text_secondary"]), tf_nombre,
+                ft.Text("Teléfono", size=12, color=t["text_secondary"]), tf_telefono,
+                ft.Text("Domicilio", size=12, color=t["text_secondary"]), tf_domicilio,
+            ],
+            spacing=6, tight=True, visible=False,
+        )
+
+        btn_editar_label = ft.Text("Editar datos", size=13)
+        btn_editar = ft.TextButton(
+            content=ft.Row([ft.Icon(ft.icons.EDIT_OUTLINED, size=15), btn_editar_label], spacing=4),
+        )
+
+        def _toggle_edit(ev):
+            editando["value"] = not editando["value"]
+            form_col.visible = editando["value"]
+            btn_editar_label.value = "Cancelar" if editando["value"] else "Editar datos"
+            if form_col.page: form_col.update()
+            if btn_editar_label.page: btn_editar_label.update()
+
+        btn_editar.on_click = _toggle_edit
+
+        def _guardar_edicion(ev):
+            nombre = (tf_nombre.value or "").strip()
+            if not nombre:
+                _show_message("El nombre es obligatorio.", t["accent"])
+                return
+            update_proveedor(proveedor["id"], {
+                "nombre": nombre,
+                "domicilio": (tf_domicilio.value or "").strip(),
+                "telefono": (tf_telefono.value or "").strip(),
+            })
+            _show_message(f"Proveedor '{nombre}' actualizado.", ft.colors.GREEN_700)
+            _refresh_all(keep_selected=proveedor["id"])
+
+        # Registrar pago a proveedor
+        tf_pago_monto = ft.TextField(
+            hint_text="Monto", border_radius=7, height=38, text_size=13,
+            content_padding=ft.padding.symmetric(8, 10),
+            keyboard_type=ft.KeyboardType.NUMBER, width=140,
+        )
+        tf_pago_desc = ft.TextField(
+            hint_text="Descripción (opcional)", border_radius=7, height=38,
+            text_size=13, content_padding=ft.padding.symmetric(8, 10), expand=True,
+        )
+
+        def _guardar_pago(ev):
+            raw = (tf_pago_monto.value or "").strip().replace(".", "").replace(",", ".")
+            try:
+                monto = float(raw)
+            except ValueError:
+                _show_message("Ingresá un monto válido.", t["accent"])
+                return
+            if monto <= 0:
+                _show_message("El monto debe ser mayor a cero.", t["accent"])
+                return
+            registrar_movimiento_proveedor(
+                proveedor_id=proveedor["id"],
+                tipo="Pago",
+                monto=monto,
+                referencia="",
+                descripcion=(tf_pago_desc.value or "").strip() or "Pago manual",
+                es_pago=True,
+            )
+            _show_message(f"Pago registrado.", ft.colors.GREEN_700)
+            _refresh_all(keep_selected=proveedor["id"])
+
+        def _build_mov_row(m: dict, zebra: bool):
+            es_debe = m.get("debe", 0) > 0
+            return ft.Container(
+                content=ft.Row([
+                    ft.Text(m.get("fecha", ""), size=11, color=t["text_secondary"], width=120),
+                    ft.Text(m.get("tipo", ""), size=11, color=t["text_secondary"], width=80),
+                    ft.Text(m.get("descripcion", ""), size=12, expand=True),
+                    ft.Text(
+                        f"+${int(m.get('debe', 0)):,}".replace(",", ".") if es_debe
+                        else f"-${int(m.get('haber', 0)):,}".replace(",", "."),
+                        size=12, weight=ft.FontWeight.W_600,
+                        color=ft.colors.ERROR if es_debe else ft.colors.GREEN_700,
+                        width=90, text_align=ft.TextAlign.RIGHT,
+                    ),
+                ], spacing=8),
+                padding=ft.padding.symmetric(8, 12),
+                bgcolor=t["bg_row_even"] if zebra else t["bg_row_odd"],
+                border=ft.border.only(bottom=ft.border.BorderSide(0.5, t["border_light"])),
+            )
+
+        movs_controls = (
+            [_build_mov_row(m, i % 2 == 0) for i, m in enumerate(movimientos)]
+            if movimientos else [
+                ft.Container(
+                    ft.Text("Sin movimientos registrados.", size=13, color=t["text_hint"]),
+                    padding=ft.padding.all(16),
+                )
+            ]
+        )
+
+        def _confirm_delete(ev):
+            nombre = proveedor.get("nombre", "")
+            def _do_delete(ev2, d):
+                delete_proveedor(proveedor["id"])
+                _show_message(f"'{nombre}' eliminado.", ft.colors.ERROR)
+                page.close(d)
+                selected_id["value"] = None
+                _refresh_all()
+
+            dlg = ft.AlertDialog(
+                modal=True,
+                title=ft.Text("Eliminar proveedor"),
+                content=ft.Text(f"¿Seguro que querés eliminar a '{nombre}'?"),
+                actions=[
+                    ft.TextButton("Cancelar", on_click=lambda ev: page.close(dlg)),
+                    ft.ElevatedButton("Eliminar", bgcolor=ft.colors.ERROR, color=t["accent_text"],
+                                      on_click=lambda ev: _do_delete(ev, dlg)),
+                ],
+                actions_alignment=ft.MainAxisAlignment.END,
+            )
+            page.open(dlg)
+
+        save_btn = ft.ElevatedButton(
+            "Guardar cambios",
+            bgcolor=t["accent"], color=t["accent_text"],
+            on_click=_guardar_edicion,
+            style=ft.ButtonStyle(padding=ft.padding.symmetric(8, 16)),
+        )
+        form_col.controls.append(save_btn)
+
+        right_panel.content = ft.Container(
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [
+                            ft.Column(
+                                [
+                                    ft.Text(proveedor.get("nombre", ""), size=18, weight=ft.FontWeight.W_700),
+                                    ft.Text(proveedor.get("telefono", "") or "Sin teléfono", size=12, color=t["text_secondary"]),
+                                    ft.Text(proveedor.get("domicilio", "") or "Sin domicilio", size=12, color=t["text_secondary"]),
+                                ],
+                                spacing=2, expand=True,
+                            ),
+                            ft.Column(
+                                [
+                                    ft.Text("Saldo", size=11, color=t["text_secondary"]),
+                                    ft.Text(_fmt_saldo(saldo), size=26, weight=ft.FontWeight.W_800, color=saldo_color),
+                                ],
+                                spacing=0,
+                                horizontal_alignment=ft.CrossAxisAlignment.END,
+                            ),
+                        ],
+                        spacing=8,
+                    ),
+                    ft.Divider(height=1, color=t["border_light"]),
+                    ft.Row([btn_editar,
+                            ft.TextButton(
+                                content=ft.Row([ft.Icon(ft.icons.DELETE_OUTLINE, size=15, color=ft.colors.ERROR),
+                                                ft.Text("Eliminar", size=13, color=ft.colors.ERROR)], spacing=4),
+                                on_click=_confirm_delete,
+                            )], spacing=0),
+                    form_col,
+                    ft.Container(
+                        content=ft.Column(
+                            [
+                                ft.Text("Registrar pago", size=13, weight=ft.FontWeight.W_500),
+                                ft.Row([tf_pago_monto, tf_pago_desc,
+                                        ft.ElevatedButton(
+                                            "Registrar",
+                                            bgcolor=ft.colors.GREEN_700,
+                                            color=ft.colors.WHITE,
+                                            on_click=_guardar_pago,
+                                            style=ft.ButtonStyle(padding=ft.padding.symmetric(8, 16)),
+                                        )], spacing=8),
+                            ],
+                            spacing=8, tight=True,
+                        ),
+                        bgcolor=t["badge_pagado"][0],
+                        border=ft.border.all(0.5, t["badge_pagado"][1]),
+                        border_radius=10,
+                        padding=14,
+                    ),
+                    ft.Text("Movimientos", size=13, weight=ft.FontWeight.W_500),
+                    ft.Container(
+                        content=ft.Column(
+                            [
+                                ft.Container(
+                                    ft.Row([
+                                        ft.Text("Fecha", size=11, weight=ft.FontWeight.W_500, color=t["text_secondary"], width=120),
+                                        ft.Text("Tipo", size=11, weight=ft.FontWeight.W_500, color=t["text_secondary"], width=80),
+                                        ft.Text("Descripción", size=11, weight=ft.FontWeight.W_500, color=t["text_secondary"], expand=True),
+                                        ft.Text("Monto", size=11, weight=ft.FontWeight.W_500, color=t["text_secondary"], width=90, text_align=ft.TextAlign.RIGHT),
+                                    ], spacing=8),
+                                    padding=ft.padding.symmetric(8, 12),
+                                    bgcolor=t["bg_header"],
+                                ),
+                                ft.Column(controls=movs_controls, spacing=0, scroll=ft.ScrollMode.AUTO, expand=True),
+                            ],
+                            spacing=0, expand=True,
+                        ),
+                        border=ft.border.all(0.5, t["border"]),
+                        border_radius=8,
+                        expand=True,
+                    ),
+                ],
+                spacing=12, expand=True,
+            ),
+            padding=ft.padding.only(left=20, right=4, top=4, bottom=4),
+            expand=True,
+        )
+        if right_panel.page:
+            right_panel.update()
+
+    list_col = ft.Column(scroll=ft.ScrollMode.AUTO, spacing=0, expand=True)
+    tf_search = ft.TextField(
+        hint_text="Buscar...",
+        border_radius=7, height=34, text_size=12,
+        content_padding=ft.padding.symmetric(6, 10),
+        border_color=t["border"],
+        focused_border_color=t["accent"],
+        prefix_icon=ft.icons.SEARCH,
+    )
+
+    def _build_list_row(proveedor: dict, saldo: float):
+        is_selected = selected_id["value"] == proveedor["id"]
+        saldo_color = ft.colors.ERROR if saldo > 0 else (
+            ft.colors.GREEN_700 if saldo < 0 else t["text_hint"]
+        )
+        return ft.Container(
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [
+                            ft.Text(proveedor["nombre"], size=13, weight=ft.FontWeight.W_600, expand=True,
+                                    max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
+                            ft.Text(_fmt_saldo(saldo), size=12, weight=ft.FontWeight.W_600, color=saldo_color),
+                        ],
+                        spacing=4,
+                    ),
+                    ft.Text(proveedor.get("telefono", "") or "—", size=11, color=t["text_secondary"]),
+                ],
+                spacing=2, tight=True,
+            ),
+            padding=ft.padding.symmetric(10, 14),
+            bgcolor=t["bg_selected"] if is_selected else t["bg_row_even"],
+            border=ft.border.only(
+                left=ft.border.BorderSide(3, t["accent"]) if is_selected else ft.border.BorderSide(3, ft.colors.TRANSPARENT),
+                bottom=ft.border.BorderSide(0.5, t["border_light"]),
+            ),
+            ink=True,
+            on_click=lambda e, p=proveedor: _select_proveedor(p),
+        )
+
+    def _select_proveedor(proveedor: dict):
+        selected_id["value"] = proveedor["id"]
+        _refresh_list()
+        _render_panel(proveedor)
+
+    def _refresh_list():
+        saldos_map = {r["id"]: r["saldo"] for r in get_resumen_proveedores()}
+        proveedores = get_proveedores()
+        query = search_filter["value"].lower()
+        if query:
+            proveedores = [
+                p for p in proveedores
+                if query in (p.get("nombre", "") + " " + p.get("telefono", "")).lower()
+            ]
+
+        proveedores.sort(key=lambda c: (-(saldos_map.get(c["id"], 0) > 0), c["nombre"].lower()))
+
+        list_col.controls.clear()
+        if not proveedores:
+            list_col.controls.append(
+                ft.Container(
+                    ft.Text("Sin resultados.", size=12, color=t["text_hint"]),
+                    padding=ft.padding.all(16),
+                )
+            )
+        else:
+            for p in proveedores:
+                list_col.controls.append(_build_list_row(p, saldos_map.get(p["id"], 0)))
+
+        if list_col.page:
+            list_col.update()
+
+    def _refresh_all(keep_selected: int | None = None):
+        _refresh_list()
+        if keep_selected is not None:
+            todos = get_proveedores()
+            match = next((p for p in todos if p["id"] == keep_selected), None)
+            if match:
+                _render_panel(match)
+        elif selected_id["value"] is None:
+            _render_empty_panel()
+
+    def _on_search(e):
+        search_filter["value"] = (e.control.value or "").strip()
+        _refresh_list()
+
+    tf_search.on_change = _on_search
+
+    def _open_nuevo_proveedor(e=None):
+        tf_n = _tf("Nombre del proveedor")
+        tf_d = _tf("Domicilio")
+        tf_t = _tf("Teléfono")
+
+        def _guardar(ev, dlg):
+            nombre = (tf_n.value or "").strip()
+            if not nombre:
+                _show_message("El nombre es obligatorio.", t["accent"])
+                return
+            new_id = save_proveedor({
+                "nombre": nombre,
+                "domicilio": (tf_d.value or "").strip(),
+                "telefono": (tf_t.value or "").strip(),
+            })
+            _show_message(f"Proveedor '{nombre}' creado.", ft.colors.GREEN_700)
+            page.close(dlg)
+            _refresh_all(keep_selected=new_id)
+
+        dlg = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Nuevo proveedor", size=16, weight=ft.FontWeight.W_500),
+            content=ft.Container(
+                content=ft.Column([
+                    ft.Text("Nombre *", size=12, color=t["text_secondary"]), tf_n,
+                    ft.Text("Teléfono", size=12, color=t["text_secondary"]), tf_t,
+                    ft.Text("Domicilio", size=12, color=t["text_secondary"]), tf_d,
+                ], spacing=8, tight=True),
+                width=420,
+            ),
+            actions=[
+                ft.TextButton("Cancelar", on_click=lambda ev: page.close(dlg)),
+                ft.ElevatedButton("Guardar", bgcolor=t["accent"], color=t["accent_text"],
+                                  on_click=lambda ev: _guardar(ev, dlg)),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        page.open(dlg)
+
+    _refresh_list()
+    saldos_map = {r["id"]: r["saldo"] for r in get_resumen_proveedores()}
+    todos = get_proveedores()
+    todos.sort(key=lambda c: (-(saldos_map.get(c["id"], 0) > 0), c["nombre"].lower()))
+    if todos:
+        selected_id["value"] = todos[0]["id"]
+        _render_panel(todos[0])
+    else:
+        _render_empty_panel()
+
+    help_btn = HelpButton([
+        {"text": "Andá a Compras para registrar una compra", "action": ("Ir a Compras", 0)},
+        {"text": "Volvé — la deuda aparece automáticamente"},
+        {"text": "Registrá pagos desde el panel derecho"},
+    ], page, on_switch_tab)
+
+    view = ft.Container(
+        content=ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Text("Proveedores", size=16, weight=ft.FontWeight.W_500, expand=True),
+                        help_btn,
+                        ft.ElevatedButton(
+                            "Nuevo proveedor", icon=ft.icons.PERSON_ADD_OUTLINED,
+                            on_click=_open_nuevo_proveedor,
+                            style=ft.ButtonStyle(
+                                bgcolor=t["accent"], color=t["accent_text"],
+                                shape=ft.RoundedRectangleBorder(radius=8),
+                                padding=ft.padding.symmetric(10, 18),
+                            ),
+                        ),
+                    ],
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                ),
+                ft.Container(
+                    content=ft.Row(
+                        [
+                            ft.Container(
+                                content=ft.Column(
+                                    [
+                                        ft.Container(content=tf_search, padding=ft.padding.all(8)),
+                                        ft.Divider(height=1, color=t["border_light"]),
+                                        list_col,
+                                    ],
+                                    spacing=0, expand=True,
+                                ),
+                                width=260,
+                                border=ft.border.only(right=ft.border.BorderSide(0.5, t["border"])),
+                                bgcolor=t["bg_card"],
+                            ),
+                            right_panel,
+                        ],
+                        spacing=0, expand=True,
+                    ),
+                    expand=True,
+                    border=ft.border.all(0.5, t["border"]),
+                    border_radius=12,
+                    bgcolor=t["bg_page"],
+                    clip_behavior=ft.ClipBehavior.HARD_EDGE,
+                ),
+            ],
+            spacing=8, expand=True,
+        ),
+        padding=ft.padding.only(top=8),
+        expand=True,
+    )
+
+    view.refresh_data = lambda: _refresh_all(keep_selected=selected_id["value"])
+    return view

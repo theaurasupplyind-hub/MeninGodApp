@@ -1,0 +1,256 @@
+
+    <!doctype html>
+    <html lang="es">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>
+        * {
+          box-sizing: border-box;
+          font-family: "Segoe UI", Arial, sans-serif;
+        }
+        body {
+          margin: 0;
+          padding: 0;
+          background: transparent;
+          width: 460px;
+        }
+        .sheet {
+          width: 460px;
+          background: white;
+          border-radius: 0;
+          overflow: hidden;
+        }
+        .hero {
+          background: linear-gradient(180deg, #ffe8a8 0%, #ffd767 100%);
+          color: #33302a;
+          padding: 22px 22px 18px;
+          border-bottom: 1px solid #f0d98f;
+        }
+        .hero-top {
+          display: flex;
+          justify-content: space-between;
+          align-items: start;
+          gap: 18px;
+        }
+        .badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          background: rgba(255, 255, 255, 0.55);
+          border: 1px solid rgba(140, 105, 0, 0.14);
+          color: #705400;
+          border-radius: 999px;
+          padding: 6px 10px;
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+        }
+        .badge-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 999px;
+          background: #18a957;
+          display: inline-block;
+        }
+        .brand {
+          font-size: 18px;
+          font-weight: 800;
+          letter-spacing: 0.08em;
+        }
+        .subtitle {
+          margin-top: 8px;
+          font-size: 13px;
+          line-height: 1.4;
+          color: #5f5847;
+        }
+        .meta {
+          text-align: right;
+          font-size: 12px;
+          line-height: 1.7;
+          min-width: 120px;
+        }
+        .content {
+          padding: 18px 18px 16px;
+        }
+        .section {
+          background: #f8f9fb;
+          border: 1px solid #e8ebf0;
+          border-radius: 18px;
+          padding: 14px;
+          margin-bottom: 12px;
+        }
+        .section-title {
+          color: #7a8091;
+          font-size: 11px;
+          margin-bottom: 10px;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          font-weight: 700;
+        }
+        .client-name {
+          color: #111827;
+          font-size: 20px;
+          font-weight: 700;
+          margin-bottom: 4px;
+        }
+        .client-line {
+          color: #586174;
+          font-size: 13px;
+          line-height: 1.45;
+        }
+        .items {
+          display: grid;
+          gap: 10px;
+        }
+        .item {
+          border: 1px solid #ebedf2;
+          border-radius: 16px;
+          padding: 12px 12px 10px;
+          background: white;
+        }
+        .item-top {
+          display: flex;
+          justify-content: space-between;
+          gap: 14px;
+          align-items: start;
+        }
+        .item-title {
+          color: #111827;
+          font-size: 14px;
+          font-weight: 600;
+          line-height: 1.35;
+        }
+        .item-qty {
+          color: #7a8091;
+          font-size: 12px;
+          margin-top: 4px;
+        }
+        .item-total {
+          color: #111827;
+          font-size: 15px;
+          font-weight: 700;
+          white-space: nowrap;
+        }
+        .item-unit {
+          margin-top: 8px;
+          color: #7a8091;
+          font-size: 12px;
+        }
+        .summary {
+          margin-top: 14px;
+          background: #fff7db;
+          border: 1px solid #f4e2a2;
+          border-radius: 20px;
+          padding: 16px 18px;
+        }
+        .summary-label {
+          color: #7a6b36;
+          font-size: 11px;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          font-weight: 700;
+          margin-bottom: 6px;
+        }
+        .summary-amount {
+          color: #2e2410;
+          font-size: 34px;
+          font-weight: 800;
+          line-height: 1;
+        }
+        .footer {
+          padding: 0 18px 18px;
+          color: #7b8190;
+          font-size: 12px;
+          text-align: center;
+          line-height: 1.45;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="sheet">
+        <div class="hero">
+          <div class="hero-top">
+            <div>
+              <div class="badge"><span class="badge-dot"></span> Presupuesto</div>
+              <div class="brand">WASI</div>
+              <div class="subtitle"></div>
+            </div>
+            <div class="meta">
+              <div><strong>N°</strong> F-10251</div>
+              <div><strong>Fecha</strong> 16/04/2026</div>
+            </div>
+          </div>
+        </div>
+        <div class="content">
+          <div class="section">
+            <div class="section-title">Cliente</div>
+            <div class="client-name">Jesus Daniel Hamanccay </div>
+            <div class="client-line">Telefono: 11245984</div>
+            <div class="client-line">Domicilio: MOnte 903 </div>
+          </div>
+          <div class="section">
+            <div class="section-title">Detalle</div>
+            <div class="items">
+              
+            <div class="item">
+              <div class="item-top">
+                <div>
+                  <div class="item-title">Medias 3/4</div>
+                  <div class="item-qty">Cantidad: 15</div>
+                </div>
+                <div class="item-total">$6.750.000</div>
+              </div>
+              <div class="item-unit">Precio unitario: $45.000</div>
+            </div>
+            
+
+            <div class="item">
+              <div class="item-top">
+                <div>
+                  <div class="item-title">Medias 4/58</div>
+                  <div class="item-qty">Cantidad: 1</div>
+                </div>
+                <div class="item-total">$54.000</div>
+              </div>
+              <div class="item-unit">Precio unitario: $5.400</div>
+            </div>
+            
+
+            <div class="item">
+              <div class="item-top">
+                <div>
+                  <div class="item-title">Medias argentina </div>
+                  <div class="item-qty">Cantidad: 1</div>
+                </div>
+                <div class="item-total">$554.000</div>
+              </div>
+              <div class="item-unit">Precio unitario: $55.400</div>
+            </div>
+            
+
+            <div class="item">
+              <div class="item-top">
+                <div>
+                  <div class="item-title">Medias River</div>
+                  <div class="item-qty">Cantidad: 1</div>
+                </div>
+                <div class="item-total">$54.000</div>
+              </div>
+              <div class="item-unit">Precio unitario: $5.400</div>
+            </div>
+            
+            </div>
+          </div>
+          <div class="summary">
+            <div class="summary-label">Total</div>
+            <div class="summary-amount">$741.200</div>
+          </div>
+        </div>
+        <div class="footer">
+        </div>
+      </div>
+    </body>
+    </html>
+    

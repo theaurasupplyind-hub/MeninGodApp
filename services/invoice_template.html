@@ -1,0 +1,228 @@
+<!-- FILE: services/invoice_template.html -->
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: "Segoe UI", Arial, sans-serif;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      width: 460px;
+    }
+    .sheet {
+      width: 460px;
+      background: white;
+      border-radius: 8px; /* Ligeramente más suave */
+      overflow: hidden;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); /* Sombra sutil */
+    }
+    .header {
+      background: #fdfdfd; /* Fondo muy claro */
+      color: #333;
+      padding: 22px 22px 18px;
+      border-bottom: 1px solid #eee;
+    }
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      gap: 18px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #eef2f6; /* Un gris azulado claro */
+      border: 1px solid #e0e6ec;
+      color: #5a677a; /* Texto más oscuro */
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em; /* Un poco menos espaciado */
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .badge-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #4CAF50; /* Verde más estándar para "Pagado/Activo" */
+      display: inline-block;
+    }
+    .brand-text {
+      font-size: 20px; /* Un poco más grande para el texto */
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      color: #222; /* Más oscuro para contraste */
+    }
+    .brand-logo {
+      max-height: 48px; /* Un poco más grande para el logo */
+      width: auto;
+      display: block;
+      object-fit: contain;
+    }
+    .subtitle {
+      margin-top: 6px; /* Ajuste de margen */
+      font-size: 13px;
+      line-height: 1.4;
+      color: #666;
+    }
+    .meta {
+      text-align: right;
+      font-size: 12px;
+      line-height: 1.7;
+      min-width: 120px;
+      color: #555;
+    }
+    .content {
+      padding: 18px 18px 16px;
+    }
+    .section {
+      background: #f9f9f9; /* Fondo muy claro para secciones */
+      border: 1px solid #eee;
+      border-radius: 12px; /* Radios más sutiles */
+      padding: 14px;
+      margin-bottom: 14px; /* Más espacio entre secciones */
+    }
+    .section-title {
+      color: #888; /* Un gris medio */
+      font-size: 11px;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-weight: 700;
+    }
+    .client-name {
+      color: #222;
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .client-line {
+      color: #666;
+      font-size: 13px;
+      line-height: 1.5; /* Ligeramente más espacio */
+    }
+    .items {
+      display: grid;
+      gap: 12px; /* Más espacio entre ítems */
+    }
+    .item {
+      border: 1px solid #e5e5e5; /* Borde más suave */
+      border-radius: 12px;
+      padding: 14px; /* Más padding */
+      background: white;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03); /* Sombra muy ligera */
+    }
+    .item-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: start;
+      margin-bottom: 8px; /* Espacio antes de la descripción */
+    }
+    .item-title {
+      color: #333;
+      font-size: 15px; /* Un poco más grande */
+      font-weight: 600;
+      line-height: 1.4;
+    }
+    .item-qty {
+      color: #777;
+      font-size: 12px;
+      margin-top: 4px;
+    }
+    .item-total {
+      color: #222;
+      font-size: 16px; /* Más prominente */
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .item-unit {
+      margin-top: 6px; /* Ajuste de margen */
+      color: #888;
+      font-size: 12px;
+      text-align: right;
+    }
+    .summary {
+      margin-top: 18px; /* Más espacio */
+      background: #f0f4f8; /* Un gris azulado claro */
+      border: 1px solid #dde7f0;
+      border-radius: 16px; /* Radios más grandes */
+      padding: 18px 20px; /* Más padding */
+      text-align: center; /* Centrar el total */
+    }
+    .summary-label {
+      color: #6a7c93; /* Un gris azulado */
+      font-size: 12px; /* Un poco más grande */
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .summary-amount {
+      color: #1a202c; /* Color oscuro para el total */
+      font-size: 38px; /* Más grande y negrita */
+      font-weight: 800;
+      line-height: 1;
+    }
+    .footer {
+      padding: 0 18px 18px;
+      color: #888;
+      font-size: 12px;
+      text-align: center;
+      line-height: 1.45;
+      margin-top: 14px; /* Espacio arriba del footer */
+    }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="header"> <!-- Cambiado de 'hero' a 'header' para ser más descriptivo -->
+      <div class="header-top">
+        <div>
+          <div class="badge"><span class="badge-dot"></span> Presupuesto</div>
+          
+          <!-- AQUÍ SE INYECTA LA IMAGEN DEL LOGO O EL TEXTO POR DEFECTO -->
+          $brand_html
+          
+          <div class="subtitle"></div>
+        </div>
+        <div class="meta">
+          <div><strong>N°</strong> $numero</div>
+          <div><strong>Fecha</strong> $fecha</div>
+        </div>
+      </div>
+    </div>
+    <div class="content">
+      <div class="section">
+        <div class="section-title">Cliente</div>
+        <div class="client-name">$cliente_nombre</div>
+        <div class="client-line">Teléfono: $cliente_telefono</div>
+        <div class="client-line">Provincia: $cliente_domicilio</div>
+        <div class="client-line">Transporte: $cliente_transporte</div>
+      </div>
+      <div class="section">
+        <div class="section-title">Detalle de Productos</div> <!-- Título más específico -->
+        <div class="items">
+          $items_html
+        </div>
+      </div>
+      <div class="summary">
+        <div class="summary-label">Total a Pagar</div> <!-- Etiqueta más clara -->
+        <div class="summary-amount">$formatted_total</div>
+        $seña_deduction
+      </div>
+    </div>
+    <div class="footer">
+    </div>
+  </div>
+</body>
+</html>
