@@ -1215,6 +1215,21 @@ def registrar_movimiento_proveedor(
         haber,
         nuevo_saldo,
     ))
+
+    # Registrar egreso en movimientos_wasi
+    if es_pago and monto > 0:
+        c.execute("SELECT nombre FROM proveedores WHERE id = ?", (proveedor_id,))
+        prov_row = c.fetchone()
+        prov_nombre = dict(prov_row)["nombre"] if prov_row else ""
+        c.execute("""
+            INSERT INTO movimientos_wasi (fecha, tipo, categoria, concepto, monto)
+            VALUES (?, 'Egreso', 'Proveedores', ?, ?)
+        """, (
+            datetime.now().strftime("%d/%m/%Y %H:%M"),
+            f"Pago a proveedor — {prov_nombre}" + (f" — {descripcion}" if descripcion.strip() else ""),
+            monto,
+        ))
+
     conn.commit()
     new_id = c.lastrowid
     conn.close()
@@ -1347,6 +1362,17 @@ def save_compra(data: dict, items: list) -> str:
             nuevo_saldo,
         ))
 
+    # Registrar egreso en movimientos_wasi
+    if total > 0:
+        c.execute("""
+            INSERT INTO movimientos_wasi (fecha, tipo, categoria, concepto, monto)
+            VALUES (?, 'Egreso', 'Compras', ?, ?)
+        """, (
+            datetime.now().strftime("%d/%m/%Y %H:%M"),
+            f"Compra {numero} — {proveedor_nombre}",
+            total,
+        ))
+
     conn.commit()
     conn.close()
     return numero
@@ -1435,6 +1461,11 @@ def update_compra(numero: str, data: dict, items: list) -> str:
             0,
             nuevo_saldo,
         ))
+        # Eliminar egreso viejo de movimientos_wasi
+        c.execute(
+            "DELETE FROM movimientos_wasi WHERE concepto LIKE ? AND tipo = 'Egreso'",
+            (f"Compra {numero}%",)
+        )
 
     # Auto-crear proveedor nuevo si hace falta
     proveedor_id = data.get("proveedor_id")
@@ -1523,6 +1554,15 @@ def update_compra(numero: str, data: dict, items: list) -> str:
             total,
             nuevo_saldo,
         ))
+        # Registrar nuevo egreso en movimientos_wasi
+        c.execute("""
+            INSERT INTO movimientos_wasi (fecha, tipo, categoria, concepto, monto)
+            VALUES (?, 'Egreso', 'Compras', ?, ?)
+        """, (
+            datetime.now().strftime("%d/%m/%Y %H:%M"),
+            f"Compra {numero} — {proveedor_nombre}",
+            total,
+        ))
 
     conn.commit()
     conn.close()
@@ -1573,6 +1613,12 @@ def delete_compra(numero: str):
             0,
             nuevo_saldo,
         ))
+
+    # Eliminar egreso de movimientos_wasi
+    c.execute(
+        "DELETE FROM movimientos_wasi WHERE concepto LIKE ? AND tipo = 'Egreso'",
+        (f"Compra {numero}%",)
+    )
 
     c.execute("DELETE FROM compras WHERE id = ?", (compra_id,))
     conn.commit()
@@ -2198,6 +2244,11 @@ def delete_factura(numero: str):
                     )
     c.execute("DELETE FROM factura_items WHERE factura_id = ?", (factura["id"],))
     c.execute("DELETE FROM facturas WHERE id = ?", (factura["id"],))
+    # Eliminar señas y cobros huérfanos de movimientos_wasi
+    c.execute(
+        "DELETE FROM movimientos_wasi WHERE concepto LIKE ? AND tipo = 'Ingreso'",
+        (f"%Factura {numero}%",)
+    )
     conn.commit()
     conn.close()
 
