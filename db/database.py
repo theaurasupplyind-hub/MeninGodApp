@@ -800,14 +800,14 @@ def revertir_stock_factura(numero_factura: str):
         cantidad = float(row["cantidad"] or 0)
         if cantidad <= 0:
             continue
-        vid = row.get("variante_id")
+        vid = row["variante_id"]
         if vid:
             c.execute(
                 "UPDATE variantes SET stock_actual = COALESCE(stock_actual,0) + ? WHERE id = ?",
                 (cantidad, vid)
             )
         else:
-            pid = row.get("producto_id")
+            pid = row["producto_id"]
             if pid:
                 c.execute(
                     "UPDATE productos SET stock_actual = COALESCE(stock_actual,0) + ? WHERE id = ?",
