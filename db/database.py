@@ -76,6 +76,8 @@ def init_db():
         c.execute("ALTER TABLE factura_items ADD COLUMN producto_id INTEGER DEFAULT NULL")
     if "curva_color_ids" not in existing_fi_cols:
         c.execute("ALTER TABLE factura_items ADD COLUMN curva_color_ids TEXT DEFAULT NULL")
+    if "variante_id" not in existing_fi_cols:
+        c.execute("ALTER TABLE factura_items ADD COLUMN variante_id INTEGER DEFAULT NULL")
 
     c.execute("""
         CREATE TABLE IF NOT EXISTS cuenta_corriente (
@@ -379,25 +381,21 @@ def save_factura(data: dict, items: list) -> str:
     factura_id = c.lastrowid
 
     for item in items:
-        if item.get("detalle", "").strip():
-            c.execute(
-                "SELECT id FROM productos WHERE LOWER(TRIM(detalle)) = LOWER(TRIM(?))",
-                (item.get("detalle", ""),)
-            )
-            prod_row = c.fetchone()
-            producto_id = prod_row["id"] if prod_row else None
-            c.execute("""
-                INSERT INTO factura_items (factura_id, cantidad, detalle, precio_unitario, total, producto_id, curva_color_ids)
-                VALUES (?,?,?,?,?,?,?)
-            """, (
-                factura_id,
-                item.get("cantidad", 1),
-                item.get("detalle", ""),
-                item.get("precio_unitario", 0),
-                item.get("total", 0),
-                producto_id,
-                item.get("curva_color_ids"),
-            ))
+        if item.get("is_note"):
+            continue
+        c.execute("""
+            INSERT INTO factura_items (factura_id, cantidad, detalle, precio_unitario, total, producto_id, variante_id, curva_color_ids)
+            VALUES (?,?,?,?,?,?,?,?)
+        """, (
+            factura_id,
+            item.get("cantidad", 1),
+            item.get("detalle", ""),
+            item.get("precio_unitario", 0),
+            item.get("total", 0),
+            item.get("producto_id"),
+            item.get("variante_id"),
+            item.get("curva_color_ids"),
+        ))
     _update_cliente_empresa_envio(conn, data.get("cliente", ""), data.get("empresa_envio", ""))
     conn.commit()
     conn.close()
@@ -443,25 +441,21 @@ def update_factura(numero: str, data: dict, items: list) -> str:
     c.execute("DELETE FROM factura_items WHERE factura_id = ?", (factura_id,))
 
     for item in items:
-        if item.get("detalle", "").strip():
-            c.execute(
-                "SELECT id FROM productos WHERE LOWER(TRIM(detalle)) = LOWER(TRIM(?))",
-                (item.get("detalle", ""),)
-            )
-            prod_row = c.fetchone()
-            producto_id = prod_row["id"] if prod_row else None
-            c.execute("""
-                INSERT INTO factura_items (factura_id, cantidad, detalle, precio_unitario, total, producto_id, curva_color_ids)
-                VALUES (?,?,?,?,?,?,?)
-            """, (
-                factura_id,
-                item.get("cantidad", 1),
-                item.get("detalle", ""),
-                item.get("precio_unitario", 0),
-                item.get("total", 0),
-                producto_id,
-                item.get("curva_color_ids"),
-            ))
+        if item.get("is_note"):
+            continue
+        c.execute("""
+            INSERT INTO factura_items (factura_id, cantidad, detalle, precio_unitario, total, producto_id, variante_id, curva_color_ids)
+            VALUES (?,?,?,?,?,?,?,?)
+        """, (
+            factura_id,
+            item.get("cantidad", 1),
+            item.get("detalle", ""),
+            item.get("precio_unitario", 0),
+            item.get("total", 0),
+            item.get("producto_id"),
+            item.get("variante_id"),
+            item.get("curva_color_ids"),
+        ))
 
     _update_cliente_empresa_envio(conn, data.get("cliente", ""), data.get("empresa_envio", ""))
     conn.commit()
@@ -754,28 +748,34 @@ def procesar_stock_factura(numero_factura: str, cliente_nombre: str, items: list
     c = conn.cursor()
 
     for item in items:
+        if item.get("is_note"):
+            continue
         if item.get("curva_color_ids"):
             continue
-        detalle = (item.get("detalle") or "").strip()
-        cantidad_pedida = float(item.get("cantidad", 0) or 0)
-        if not detalle or cantidad_pedida <= 0:
+        variante_id = item.get("variante_id")
+        producto_id = item.get("producto_id")
+        cantidad = float(item.get("cantidad", 0) or 0)
+        if cantidad <= 0:
             continue
 
-        c.execute(
-            "SELECT * FROM productos WHERE LOWER(TRIM(detalle)) = LOWER(TRIM(?))",
-            (detalle,)
-        )
-        prod = c.fetchone()
-        if not prod:
-            continue
-
-        prod = dict(prod)
-        a_descontar = min(cantidad_pedida, float(prod.get("stock_actual", 0) or 0))
-
-        if a_descontar > 0:
+        if variante_id:
             c.execute(
-                "UPDATE productos SET stock_actual = MAX(0, stock_actual - ?) WHERE id = ?",
-                (a_descontar, prod["id"])
+                "UPDATE variantes SET stock_actual = MAX(0, COALESCE(stock_actual,0) - ?) WHERE id = ?",
+                (cantidad, variante_id)
+            )
+        elif producto_id:
+            c.execute(
+                "UPDATE productos SET stock_actual = MAX(0, COALESCE(stock_actual,0) - ?) WHERE id = ?",
+                (cantidad, producto_id)
+            )
+
+        if variante_id:
+            registrar_movimiento_stock(
+                variante_id,
+                "facturacion",
+                numero_factura,
+                -cantidad,
+                f"Factura {numero_factura} — {cliente_nombre}",
             )
 
     conn.commit()
@@ -788,23 +788,31 @@ def revertir_stock_factura(numero_factura: str):
     c = conn.cursor()
 
     c.execute(
-        """SELECT fi.cantidad, fi.producto_id
+        """SELECT fi.cantidad, fi.producto_id, fi.variante_id
            FROM factura_items fi
            JOIN facturas f ON f.id = fi.factura_id
-           WHERE f.numero = ? AND fi.producto_id IS NOT NULL""",
+           WHERE f.numero = ?""",
         (numero_factura,)
     )
     rows = c.fetchall()
 
     for row in rows:
-        prod_id = row["producto_id"]
         cantidad = float(row["cantidad"] or 0)
-        if not prod_id or cantidad <= 0:
+        if cantidad <= 0:
             continue
-        c.execute(
-            "UPDATE productos SET stock_actual = stock_actual + ? WHERE id = ?",
-            (cantidad, prod_id)
-        )
+        vid = row.get("variante_id")
+        if vid:
+            c.execute(
+                "UPDATE variantes SET stock_actual = COALESCE(stock_actual,0) + ? WHERE id = ?",
+                (cantidad, vid)
+            )
+        else:
+            pid = row.get("producto_id")
+            if pid:
+                c.execute(
+                    "UPDATE productos SET stock_actual = COALESCE(stock_actual,0) + ? WHERE id = ?",
+                    (cantidad, pid)
+                )
 
     conn.commit()
     conn.close()
@@ -2158,21 +2166,26 @@ def delete_factura(numero: str):
     c.execute("SELECT * FROM factura_items WHERE factura_id = ?", (factura["id"],))
     items = [dict(r) for r in c.fetchall()]
     for item in items:
-        pid = item.get("producto_id")
-        if pid:
+        cantidad = float(item.get("cantidad") or 0)
+        vid = item.get("variante_id")
+        if vid:
+            c.execute(
+                "UPDATE variantes SET stock_actual = COALESCE(stock_actual,0) + ? WHERE id = ?",
+                (cantidad, vid)
+            )
+        elif item.get("producto_id"):
             c.execute(
                 "UPDATE productos SET stock_actual = MAX(0, COALESCE(stock_actual,0) + ?) WHERE id = ?",
-                (item["cantidad"], pid)
+                (cantidad, item["producto_id"])
             )
         cci = item.get("curva_color_ids")
-        if cci:
-            cantidad = float(item["cantidad"] or 0)
-            for vid in cci.split(","):
-                vid = vid.strip()
-                if vid:
+        if cci and cantidad > 0:
+            for cvid in cci.split(","):
+                cvid = cvid.strip()
+                if cvid:
                     c.execute(
                         "UPDATE variantes SET stock_actual = COALESCE(stock_actual,0) + ? WHERE id = ?",
-                        (cantidad, int(vid))
+                        (cantidad, int(cvid))
                     )
     c.execute("DELETE FROM factura_items WHERE factura_id = ?", (factura["id"],))
     c.execute("DELETE FROM facturas WHERE id = ?", (factura["id"],))
