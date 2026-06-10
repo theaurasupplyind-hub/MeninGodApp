@@ -14,6 +14,7 @@ def get_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 
@@ -744,9 +745,6 @@ def get_stock_bajo() -> list:
 # ── Stock: descuento al facturar ────────────────────────────────────────────
 
 def procesar_stock_factura(numero_factura: str, cliente_nombre: str, items: list) -> list:
-    conn = get_connection()
-    c = conn.cursor()
-
     for item in items:
         if item.get("is_note"):
             continue
@@ -758,28 +756,30 @@ def procesar_stock_factura(numero_factura: str, cliente_nombre: str, items: list
         if cantidad <= 0:
             continue
 
+        conn = get_connection()
+        c = conn.cursor()
+
         if variante_id:
             c.execute(
                 "UPDATE variantes SET stock_actual = MAX(0, COALESCE(stock_actual,0) - ?) WHERE id = ?",
                 (cantidad, variante_id)
             )
+            c.execute("SELECT stock_actual FROM variantes WHERE id = ?", (variante_id,))
+            stock_resultante = float(c.fetchone()[0] or 0)
+            c.execute("""
+                INSERT INTO movimientos_stock (variante_id, tipo, referencia, cantidad, stock_resultante, motivo)
+                VALUES (?,?,?,?,?,?)
+            """, (variante_id, "facturacion", numero_factura, -cantidad, stock_resultante,
+                  f"Factura {numero_factura} — {cliente_nombre}"))
         elif producto_id:
             c.execute(
                 "UPDATE productos SET stock_actual = MAX(0, COALESCE(stock_actual,0) - ?) WHERE id = ?",
                 (cantidad, producto_id)
             )
 
-        if variante_id:
-            registrar_movimiento_stock(
-                variante_id,
-                "facturacion",
-                numero_factura,
-                -cantidad,
-                f"Factura {numero_factura} — {cliente_nombre}",
-            )
+        conn.commit()
+        conn.close()
 
-    conn.commit()
-    conn.close()
     return []
 
 
