@@ -468,9 +468,18 @@ def get_facturas(limit: int = 50) -> list:
     conn = get_connection()
     c = conn.cursor()
     c.execute("""
-        SELECT id, numero, fecha, cliente_nombre, total, estado
-        FROM facturas
-        ORDER BY id DESC
+        SELECT
+            f.id, f.numero, f.fecha, f.cliente_nombre,
+            f.total, f.estado, f.envio_estado,
+            MAX(0, f.total - COALESCE(f."seña", 0) - COALESCE(pagos.total_pagado, 0)) AS deuda
+        FROM facturas f
+        LEFT JOIN (
+            SELECT referencia, SUM(haber) AS total_pagado
+            FROM cuenta_corriente
+            WHERE tipo = 'Pago'
+            GROUP BY referencia
+        ) pagos ON pagos.referencia = f.numero
+        ORDER BY f.id DESC
         LIMIT ?
     """, (limit,))
     rows = [dict(r) for r in c.fetchall()]
