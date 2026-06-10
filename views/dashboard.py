@@ -157,7 +157,7 @@ def _cobro_button(page: ft.Page, factura: dict, on_cobro=None):
                 sb_text += f" Saldo restante: ${int(resultado['saldo_restante']):,}".replace(",", ".")
             page.open(ft.SnackBar(ft.Text(sb_text, color=ft.Colors.WHITE), bgcolor=ft.Colors.GREEN_700, duration=3500))
             if on_cobro:
-                on_cobro()
+                on_cobro(None)
 
         dlg = ft.AlertDialog(
             modal=True,
