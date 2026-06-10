@@ -218,6 +218,21 @@ def init_db():
         )
     """)
 
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS factura_curvas_completas (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            factura_id      INTEGER NOT NULL,
+            cantidad        REAL DEFAULT 1,
+            detalle         TEXT DEFAULT '',
+            precio_unitario REAL DEFAULT 0,
+            total           REAL DEFAULT 0,
+            producto_id     INTEGER,
+            variante_ids    TEXT,
+            es_surtida      INTEGER DEFAULT 0,
+            FOREIGN KEY (factura_id) REFERENCES facturas(id) ON DELETE CASCADE
+        )
+    """)
+
     existing_cols = {row[1] for row in c.execute("PRAGMA table_info(facturas)")}
     if "seña" not in existing_cols:
         c.execute("ALTER TABLE facturas ADD COLUMN seña REAL DEFAULT 0")
@@ -497,7 +512,13 @@ def get_factura_by_numero(numero: str) -> dict | None:
         return None
     factura = dict(row)
     c.execute("SELECT * FROM factura_items WHERE factura_id = ?", (factura["id"],))
-    factura["items"] = [dict(r) for r in c.fetchall()]
+    items = [dict(r) for r in c.fetchall()]
+    c.execute("SELECT * FROM factura_curvas_completas WHERE factura_id = ?", (factura["id"],))
+    for cc in c.fetchall():
+        cc = dict(cc)
+        cc["is_curva_completa"] = True
+        items.append(cc)
+    factura["items"] = items
     conn.close()
     return factura
 
@@ -797,7 +818,7 @@ def revertir_stock_factura(numero_factura: str):
     c = conn.cursor()
 
     c.execute(
-        """SELECT fi.cantidad, fi.producto_id, fi.variante_id
+        """SELECT fi.cantidad, fi.producto_id, fi.variante_id, fi.curva_color_ids
            FROM factura_items fi
            JOIN facturas f ON f.id = fi.factura_id
            WHERE f.numero = ?""",
@@ -806,6 +827,8 @@ def revertir_stock_factura(numero_factura: str):
     rows = c.fetchall()
 
     for row in rows:
+        if row["curva_color_ids"]:
+            continue
         cantidad = float(row["cantidad"] or 0)
         if cantidad <= 0:
             continue
@@ -864,9 +887,13 @@ def revertir_stock_curva_color(numero: str) -> None:
             vid = vid.strip()
             if not vid:
                 continue
+            try:
+                int_vid = int(vid)
+            except ValueError:
+                continue
             c.execute(
                 "UPDATE variantes SET stock_actual = COALESCE(stock_actual,0) + ? WHERE id = ?",
-                (cantidad, int(vid))
+                (cantidad, int_vid)
             )
     conn.commit()
     conn.close()
@@ -967,6 +994,8 @@ def save_from_factura(cliente_data: dict, items: list, numero_factura: str = "",
         cliente_id = save_cliente(cliente_data)
 
     for item in items:
+        if item.get("is_curva_color") or item.get("is_curva_completa"):
+            continue
         detalle = (item.get("detalle", "") or "").strip()
         if detalle:
             save_producto({
@@ -1362,17 +1391,6 @@ def save_compra(data: dict, items: list) -> str:
             nuevo_saldo,
         ))
 
-    # Registrar egreso en movimientos_wasi
-    if total > 0:
-        c.execute("""
-            INSERT INTO movimientos_wasi (fecha, tipo, categoria, concepto, monto)
-            VALUES (?, 'Egreso', 'Compras', ?, ?)
-        """, (
-            datetime.now().strftime("%d/%m/%Y %H:%M"),
-            f"Compra {numero} — {proveedor_nombre}",
-            total,
-        ))
-
     conn.commit()
     conn.close()
     return numero
@@ -1461,7 +1479,7 @@ def update_compra(numero: str, data: dict, items: list) -> str:
             0,
             nuevo_saldo,
         ))
-        # Eliminar egreso viejo de movimientos_wasi
+        # Eliminar registro viejo de movimientos_wasi si existiera
         c.execute(
             "DELETE FROM movimientos_wasi WHERE concepto LIKE ? AND tipo = 'Egreso'",
             (f"Compra {numero}%",)
@@ -1554,15 +1572,6 @@ def update_compra(numero: str, data: dict, items: list) -> str:
             total,
             nuevo_saldo,
         ))
-        # Registrar nuevo egreso en movimientos_wasi
-        c.execute("""
-            INSERT INTO movimientos_wasi (fecha, tipo, categoria, concepto, monto)
-            VALUES (?, 'Egreso', 'Compras', ?, ?)
-        """, (
-            datetime.now().strftime("%d/%m/%Y %H:%M"),
-            f"Compra {numero} — {proveedor_nombre}",
-            total,
-        ))
 
     conn.commit()
     conn.close()
@@ -1613,12 +1622,6 @@ def delete_compra(numero: str):
             0,
             nuevo_saldo,
         ))
-
-    # Eliminar egreso de movimientos_wasi
-    c.execute(
-        "DELETE FROM movimientos_wasi WHERE concepto LIKE ? AND tipo = 'Egreso'",
-        (f"Compra {numero}%",)
-    )
 
     c.execute("DELETE FROM compras WHERE id = ?", (compra_id,))
     conn.commit()
@@ -2001,6 +2004,30 @@ def get_or_create_localidad(nombre: str, provincia: str = "") -> int:
 
 # ── Curvas pendientes ─────────────────────────────────────────────────────────
 
+def save_curvas_completas(factura_id: int, items: list[dict]) -> None:
+    """Save COMPLETA curve items to factura_curvas_completas table."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM factura_curvas_completas WHERE factura_id = ?", (factura_id,))
+    for item in items:
+        c.execute("""
+            INSERT INTO factura_curvas_completas
+                (factura_id, cantidad, detalle, precio_unitario, total, producto_id, variante_ids, es_surtida)
+            VALUES (?,?,?,?,?,?,?,?)
+        """, (
+            factura_id,
+            item.get("cantidad", 1),
+            item.get("detalle", ""),
+            item.get("precio_unitario", 0),
+            item.get("total", 0),
+            item.get("producto_id"),
+            item.get("variante_ids"),
+            1 if item.get("es_surtida") else 0,
+        ))
+    conn.commit()
+    conn.close()
+
+
 def save_curva_pendiente(data: dict) -> int:
     conn = get_connection()
     c = conn.cursor()
@@ -2221,6 +2248,8 @@ def delete_factura(numero: str):
     c.execute("SELECT * FROM factura_items WHERE factura_id = ?", (factura["id"],))
     items = [dict(r) for r in c.fetchall()]
     for item in items:
+        if item.get("curva_color_ids"):
+            continue
         cantidad = float(item.get("cantidad") or 0)
         vid = item.get("variante_id")
         if vid:
@@ -2233,15 +2262,6 @@ def delete_factura(numero: str):
                 "UPDATE productos SET stock_actual = MAX(0, COALESCE(stock_actual,0) + ?) WHERE id = ?",
                 (cantidad, item["producto_id"])
             )
-        cci = item.get("curva_color_ids")
-        if cci and cantidad > 0:
-            for cvid in cci.split(","):
-                cvid = cvid.strip()
-                if cvid:
-                    c.execute(
-                        "UPDATE variantes SET stock_actual = COALESCE(stock_actual,0) + ? WHERE id = ?",
-                        (cantidad, int(cvid))
-                    )
     c.execute("DELETE FROM factura_items WHERE factura_id = ?", (factura["id"],))
     c.execute("DELETE FROM facturas WHERE id = ?", (factura["id"],))
     # Eliminar señas y cobros huérfanos de movimientos_wasi
