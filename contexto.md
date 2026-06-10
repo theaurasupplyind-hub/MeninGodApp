@@ -1,7 +1,7 @@
 # contexto.md — App Ropa Cliente
 
-> Stack: Flet 0.23.2 · Python 3.11 · SQLite
-> Propósito: Referencia de sintaxis y patrones válidos para Flet 0.23.2.
+> Stack: Flet 0.28.3 · Python 3.13 · SQLite
+> Propósito: Referencia de sintaxis y patrones válidos para Flet 0.28.3.
 
 ---
 
@@ -17,7 +17,7 @@ ft.Container(
     border=ft.border.all(1, "#2E4057"),
 )
 ```
-*Fuente: `theme.py:137-145` (función `base_card()`)*
+*Fuente: `theme.py:122-130` (función `base_card()`)*
 
 ### 1.2 Separador invisible
 ```python
@@ -34,7 +34,7 @@ ft.Column([...], spacing=12, expand=True)
 
 ### 1.4 Divider
 ```python
-ft.Divider(height=1, color=ft.colors.GREY_200)
+ft.Divider(height=1, color=ft.Colors.GREY_200)
 ft.Divider(height=0.5, thickness=0.5)
 ```
 
@@ -59,7 +59,7 @@ ft.TextField(
     on_change=on_change,
 )
 ```
-*Fuente: `theme.py:119-134` (función `base_input()`)*
+*Fuente: `theme.py:104-119` (función `base_input()`)*
 
 ### 2.2 Dropdown
 ```python
@@ -70,12 +70,12 @@ ft.Dropdown(
     ],
     value="Efectivo",
     border_radius=7,
-    height=38,
     text_size=13,
     content_padding=ft.padding.symmetric(4, 10),
     width=160,
 )
 ```
+⚠️ En 0.28.3 el param `height` fue eliminado de `Dropdown`.
 
 ### 2.3 KeyboardType.NUMBER
 ```python
@@ -94,11 +94,10 @@ ac = AutocompleteField(
     sublabel_fn=lambda c: c.get("telefono", "") or "",
     hint_text="Nombre del cliente",
     expand=True,
+    allow_free_text=True,   # True = permite texto libre, False = solo selección
+    search_label="cliente",
+    icon=ft.Icons.PEOPLE_OUTLINED,
     on_submit_next=lambda: siguiente_control.focus(),
-)
-ac._on_select = lambda cliente: (
-    setattr(tf_domicilio, "value", cliente.get("domicilio", ""))
-    or tf_domicilio.update()
 )
 ```
 
@@ -115,21 +114,21 @@ ft.ElevatedButton(
     on_click=handler,
     style=ft.ButtonStyle(
         shape=ft.RoundedRectangleBorder(radius=8),
-        overlay_color=ft.colors.with_opacity(0.15, "#FFFFFF"),
+        overlay_color=ft.Colors.with_opacity(0.15, "#FFFFFF"),
     ),
 )
 ```
-*Fuente: `theme.py:104-116` (función `accent_button()`)*
+*Fuente: `theme.py:89-101` (función `accent_button()`)*
 
 ### 3.2 ElevatedButton con icono
 ```python
 ft.ElevatedButton(
     "Nuevo producto",
-    icon=ft.icons.ADD_CIRCLE_OUTLINE,
+    icon=ft.Icons.ADD_CIRCLE_OUTLINE,
     on_click=_open_dialog,
     style=ft.ButtonStyle(
-        bgcolor=ft.colors.BLUE_700,
-        color=ft.colors.WHITE,
+        bgcolor=ft.Colors.BLUE_700,
+        color=ft.Colors.WHITE,
         shape=ft.RoundedRectangleBorder(radius=8),
         padding=ft.padding.symmetric(10, 18),
     ),
@@ -140,12 +139,12 @@ ft.ElevatedButton(
 ```python
 ft.OutlinedButton(
     "Ver PDF",
-    icon=ft.icons.PICTURE_AS_PDF_OUTLINED,
+    icon=ft.Icons.PICTURE_AS_PDF_OUTLINED,
     on_click=handler,
     style=ft.ButtonStyle(
         shape=ft.RoundedRectangleBorder(radius=8),
         padding=ft.padding.symmetric(10, 14),
-        color=ft.colors.GREY_700,
+        color=ft.Colors.GREY_700,
     ),
 )
 ```
@@ -154,14 +153,14 @@ ft.OutlinedButton(
 ```python
 ft.OutlinedButton(
     "Compartir WhatsApp",
-    icon=ft.icons.SHARE_OUTLINED,
+    icon=ft.Icons.SHARE_OUTLINED,
     width=210,
     on_click=handler,
     style=ft.ButtonStyle(
         shape=ft.RoundedRectangleBorder(radius=8),
         padding=ft.padding.symmetric(10, 14),
-        color=ft.colors.GREEN_700,
-        side=ft.BorderSide(1, ft.colors.GREEN_200),
+        color=ft.Colors.GREEN_700,
+        side=ft.BorderSide(1, ft.Colors.GREEN_200),
     ),
 )
 ```
@@ -174,10 +173,10 @@ ft.TextButton("Cancelar", on_click=lambda ev: page.close(dlg))
 ### 3.6 IconButton
 ```python
 ft.IconButton(
-    ft.icons.EDIT_OUTLINED,
+    ft.Icons.EDIT_OUTLINED,
     icon_size=16,
     tooltip="Editar",
-    icon_color=ft.colors.BLUE_600,
+    icon_color=ft.Colors.BLUE_600,
     on_click=lambda e: handler(),
     style=ft.ButtonStyle(padding=ft.padding.all(4)),
 )
@@ -202,14 +201,13 @@ ft.DataTable(
             ]
         )
     ],
-    border=ft.border.all(0.5, ft.colors.GREY_300),
+    border=ft.border.all(0.5, ft.Colors.GREY_300),
     border_radius=8,
-    horizontal_lines=ft.border.BorderSide(0.5, ft.colors.GREY_200),
+    horizontal_lines=ft.border.BorderSide(0.5, ft.Colors.GREY_200),
     column_spacing=20,
     data_row_max_height=44,
 )
 ```
-*Fuente: `dashboard.py:289-311`*
 
 ### 4.2 ListView (reemplaza Column para scroll)
 ```python
@@ -219,7 +217,7 @@ Usar `ListView` en lugar de `Column` cuando el contenido puede ser largo y neces
 
 ### 4.3 Filas zebra
 ```python
-bgcolor=ft.colors.WHITE if zebra else "#FAFAFA"
+bgcolor="#111827" if zebra else "#0D1520"
 # donde zebra = (i % 2 == 0)
 ```
 
@@ -238,7 +236,7 @@ bg, fg = _get_estado_colors(estado, t)
 badge = ft.Container(
     content=ft.Row(
         [ft.Text(estado, size=11, color=fg, weight=ft.FontWeight.W_500),
-         ft.Icon(ft.icons.UNFOLD_MORE, size=12, color=fg)],
+         ft.Icon(ft.Icons.UNFOLD_MORE, size=12, color=fg)],
         spacing=2, tight=True,
     ),
     bgcolor=bg,
@@ -248,7 +246,6 @@ badge = ft.Container(
     on_click=on_click_handler,
 )
 ```
-*Fuente: `dashboard.py:16-138`*
 
 ---
 
@@ -271,19 +268,17 @@ dlg = ft.AlertDialog(
 )
 page.open(dlg)
 ```
-*Fuente: `stock.py:118-153`*
 
 ### 5.2 SnackBar
 ```python
-def _show_message(text: str, color=ft.colors.BLUE_700):
+def _show_message(text: str, color=ft.Colors.BLUE_700):
     sb = ft.SnackBar(
-        ft.Text(text, color=ft.colors.WHITE),
+        ft.Text(text, color=ft.Colors.WHITE),
         bgcolor=color,
         duration=3200,
     )
     page.open(sb)
 ```
-*Fuente: `stock.py:70-76`*
 
 ---
 
@@ -295,10 +290,9 @@ from theme import get_theme
 
 def build_view(page):
     t = get_theme(page)
-    # dark = page.theme_mode == ft.ThemeMode.DARK
     # Usar t["bg_page"], t["bg_card"], t["accent"], etc.
 ```
-*Fuente: `theme.py` — 145 líneas, modo oscuro + claro.*
+*Fuente: `theme.py` — modo oscuro + claro.*
 
 ### 6.2 Helpers de theme.py
 ```python
@@ -332,22 +326,22 @@ t["badge_ajuste"]     = ("#252525", "#777777")
 
 ### 7.1 Keyboard handler (F1, F2)
 ```python
-_previous_handler = page.on_keyboard_event
+_prev_kb = page.on_keyboard_event
 
 def _on_keyboard(e: ft.KeyboardEvent):
     if e.key == "F1":
         ctrl.save()
     elif e.key == "F2":
         ctrl.nueva()
-    elif _previous_handler:
-        _previous_handler(e)
+    elif _prev_kb:
+        _prev_kb(e)
 
 page.on_keyboard_event = _on_keyboard
 
 # Dispose:
-view.dispose = lambda: setattr(page, "on_keyboard_event", _previous_handler)
+view.dispose = lambda: setattr(page, "on_keyboard_event", _prev_kb)
 ```
-*Fuente: `facturacion/view.py:174-194`*
+⚠️ En 0.28.3, abrir un modal reemplaza `page.on_keyboard_event` — guardá y restaurá el handler previo.
 
 ### 7.2 Callbacks comunes
 ```python
@@ -370,19 +364,19 @@ def _safe_update(control):
 ### 7.4 NavigationRail
 ```python
 TABS = [
-    ("Dashboard",   ft.icons.DASHBOARD_OUTLINED,       ft.icons.DASHBOARD),
-    ("Facturacion", ft.icons.RECEIPT_LONG_OUTLINED,    ft.icons.RECEIPT_LONG),
-    ("Clientes",    ft.icons.PEOPLE_OUTLINED,          ft.icons.PEOPLE),
-    ("Productos",   ft.icons.INVENTORY_2_OUTLINED,     ft.icons.INVENTORY_2),
-    ("Cuenta",      ft.icons.ACCOUNT_BALANCE_WALLET_OUTLINED, ft.icons.ACCOUNT_BALANCE_WALLET),
+    ("Dashboard",   ft.Icons.DASHBOARD_OUTLINED,       ft.Icons.DASHBOARD),
+    ("Facturacion", ft.Icons.RECEIPT_LONG_OUTLINED,    ft.Icons.RECEIPT_LONG),
+    ("Clientes",    ft.Icons.PEOPLE_OUTLINED,          ft.Icons.PEOPLE),
+    ("Productos",   ft.Icons.INVENTORY_2_OUTLINED,     ft.Icons.INVENTORY_2),
+    ("Cuenta",      ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, ft.Icons.ACCOUNT_BALANCE_WALLET),
 ]
 
 rail = ft.NavigationRail(
     selected_index=0,
     label_type=ft.NavigationRailLabelType.ALL,
-    min_width=72,
-    bgcolor=ft.colors.GREY_50,
-    indicator_color=ft.colors.BLUE_100,
+    min_width=148,
+    bgcolor="#111827",
+    indicator_color="#C9A84C",
     destinations=[
         ft.NavigationRailDestination(
             icon=icon_out, selected_icon=icon_sel, label=label
@@ -391,7 +385,7 @@ rail = ft.NavigationRail(
     on_change=lambda e: _switch(e.control.selected_index),
 )
 ```
-*Fuente: `main.py:30-204`*
+*Fuente: `main.py:31-227`*
 
 ---
 
@@ -437,16 +431,41 @@ def _col_exists(c, table: str, col: str) -> bool:
 if not _col_exists(c, "facturas", "seña"):
     c.execute("ALTER TABLE facturas ADD COLUMN seña REAL DEFAULT 0")
 ```
-*Fuente: `database_nuevas_tablas.py:9-11, 70-71`*
+
+### 8.5 Window properties (0.28.3)
+```python
+page.window.title_bar_hidden = True
+page.window.title_bar_buttons_hidden = True
+page.window.width = 1280
+page.window.height = 740
+page.window.min_width = 980
+page.window.min_height = 620
+page.window.minimized = True
+page.window.maximized = not page.window.maximized
+page.window.close()
+```
+
+### 8.6 Overlay / dialogs (0.28.3)
+```python
+page.open(dlg)    # reemplaza page.overlay.append(dlg) + dlg.update()
+page.close(dlg)   # reemplaza page.overlay.remove(dlg)
+page.open(sb)     # SnackBar también usa page.open()
+```
 
 ---
 
-## Restricciones de Flet 0.23.2
+## Restricciones de Flet 0.28.3
 
+- `ft.icons` → `ft.Icons` (capitalizado). `ft.colors` → `ft.Colors`.
+- `page.window_width` → `page.window.width` (propiedades anidadas).
+- `page.overlay.append(dlg)` → `page.open(dlg)`. `page.overlay.remove(dlg)` → `page.close(dlg)`.
+- `Dropdown` NO acepta `height` (eliminado en 0.28.3).
+- `SURFACE_VARIANT` → `SURFACE_CONTAINER_HIGHEST`.
+- `ft.app(main, assets_dir="assets")` funciona (versión sync).
+- `page.on_keyboard_event` se reemplaza al abrir modal — guardá/restaurá el handler.
 - `page.add()` NO acepta listas → usar `*lista` o agregar uno por uno.
 - `on_click` siempre recibe `(e)` como parámetro.
-- `bgcolor` acepta string hex `"#RRGGBB"` o `ft.colors.X`.
-- NO usar `ft.ResponsiveRow` (no existe en 0.23.2).
+- `bgcolor` acepta string hex `"#RRGGBB"` o `ft.Colors.X`.
 - `ft.TextField`: usar `content_padding=ft.padding.symmetric(v, h)`.
-- `ft.Dropdown`: `items` son `ft.dropdown.Option(key, text)`.
+- `ft.Dropdown`: `options` son `ft.dropdown.Option(key, text)`.
 - Para scroll en Column, usar `ft.ListView` en su lugar.

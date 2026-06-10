@@ -22,94 +22,70 @@ def search_clientes(query: str, limit: int = 6) -> list[dict]:
     return results
 
 
-def search_productos(query: str, limit: int = 8) -> list[dict]:
+def search_productos(query: str, limit: int = 10) -> list[dict]:
     q = query.strip().lower()
     if not q:
         return []
-    results = []
+    tokens = [t for t in q.split() if t]
 
     all_variants = get_variantes_con_producto()
-    from collections import defaultdict
-    prod_variants: dict[int, list] = defaultdict(list)
-    for v in all_variants:
-        prod_variants[v["producto_id"]].append(v)
 
-    for p in get_productos():
-        if q not in (p.get("detalle", "") or "").lower():
+    scored = []
+    seen_ids = set()
+    for v in all_variants:
+        detalle = (v.get("producto_detalle") or "").lower()
+        color = (v.get("color") or "").lower()
+        talla = (v.get("talla") or "").lower()
+        full_label = f"{detalle} {color} {talla}"
+
+        score = 0
+        all_matched = True
+        for token in tokens:
+            matched = False
+            if token in detalle:
+                score += 10
+                matched = True
+            if token in color:
+                score += 8
+                matched = True
+            if token in talla:
+                score += 6
+                matched = True
+            if not matched:
+                all_matched = False
+
+        if score == 0:
             continue
 
-        # 1. Product entry
-        results.append({"is_variant": False, **p})
-        if len(results) >= limit:
-            return results
+        if all_matched:
+            score += 20
 
-        # 2. Curva suggestions for this product immediately
-        if p["id"] in prod_variants:
-            pvars = prod_variants[p["id"]]
-            by_color: dict[str, list] = {}
-            for v in pvars:
-                by_color.setdefault(v.get("color") or "Sin color", []).append(v)
+        vid = v["variante_id"]
+        if vid in seen_ids:
+            continue
+        seen_ids.add(vid)
 
-            for cname, cvars in by_color.items():
-                if len(cvars) >= 2:
-                    total = sum(float(v.get("precio_unitario", 0) or 0) for v in cvars)
-                    results.append({
-                        "is_curva": True, "es_surtida": False,
-                        "id": p["id"],
-                        "detalle": f"Curva {cname}",
-                        "producto_detalle": p.get("detalle", ""),
-                        "precio_unitario": total,
-                        "color_id": cvars[0].get("color_id"),
-                        "color": cname,
-                        "variante_ids": [v["variante_id"] for v in cvars],
-                    })
-                    if len(results) >= limit:
-                        return results
+        stock = float(v.get("stock_actual", 0) or 0)
+        if stock > 0:
+            score += 5
 
-            if len(by_color) >= 2:
-                # Price = one complete set of talles (first color)
-                first_color_vars = next(iter(by_color.values()))
-                total = sum(float(v.get("precio_unitario", 0) or 0) for v in first_color_vars)
-                results.append({
-                    "is_curva": True, "es_surtida": True,
-                    "id": p["id"],
-                    "detalle": "Curva Surtida",
-                    "producto_detalle": p.get("detalle", ""),
-                    "precio_unitario": total,
-                    "variante_ids": [v["variante_id"] for v in pvars],
-                })
-                if len(results) >= limit:
-                    return results
+        scored.append({
+            "score": score,
+            "is_variant": True,
+            "id": v["producto_id"],
+            "detalle": v["producto_detalle"],
+            "variante_id": vid,
+            "color_id": v.get("color_id"),
+            "talla_id": v.get("talla_id"),
+            "color": color or "",
+            "talla": talla or "",
+            "precio_unitario": v.get("precio_unitario", 0),
+            "precio_compra": v.get("precio_compra", 0),
+            "stock_actual": stock,
+        })
 
-    # 3. Variant search for unmatched variants
-    if len(results) < limit:
-        for v in all_variants:
-            color = v.get("color") or ""
-            talla = v.get("talla") or ""
-            label = f"{v.get('producto_detalle', '')} {color} {talla}".lower()
-            if q in label:
-                already = any(
-                    r.get("is_variant") and r.get("variante_id") == v["variante_id"]
-                    for r in results
-                )
-                if not already:
-                    results.append({
-                        "is_variant": True,
-                        "id": v["producto_id"],
-                        "detalle": v["producto_detalle"],
-                        "variante_id": v["variante_id"],
-                        "color_id": v.get("color_id"),
-                        "talla_id": v.get("talla_id"),
-                        "color": color,
-                        "talla": talla,
-                        "precio_unitario": v.get("precio_unitario", 0),
-                        "precio_compra": v.get("precio_compra", 0),
-                        "stock_actual": v.get("stock_actual", 0),
-                    })
-                if len(results) >= limit:
-                    return results
-
-    return results
+    scored.sort(key=lambda x: (-x["score"], x["detalle"], x["color"], x["talla"]))
+    return scored[:limit]
 
 
 def search_proveedores(query: str, limit: int = 6) -> list[dict]:
@@ -134,42 +110,11 @@ def search_productos_proveedor(query: str, limit: int = 8) -> list[dict]:
     if not q:
         return []
     results = []
-
-    # Search products by name
     for p in get_productos_proveedor():
         if q in (p.get("detalle", "") or "").lower():
             results.append({"is_variant": False, **p})
         if len(results) >= limit:
-            return results
-
-    # If room left, search variants by product+color+talla
-    if len(results) < limit:
-        for v in get_variantes_proveedor():
-            color = v.get("color") or ""
-            talla = v.get("talla") or ""
-            label = f"{v.get('producto_detalle', '')} {color} {talla}".lower()
-            if q in label:
-                already = any(
-                    r.get("is_variant") and r.get("variante_id") == v["variante_id"]
-                    for r in results
-                )
-                if not already:
-                    results.append({
-                        "is_variant": True,
-                        "id": v["producto_id"],
-                        "detalle": v["producto_detalle"],
-                        "variante_id": v["variante_id"],
-                        "color_id": v.get("color_id"),
-                        "talla_id": v.get("talla_id"),
-                        "color": color,
-                        "talla": talla,
-                        "precio_unitario": v.get("precio_unitario", 0),
-                        "precio_compra": v.get("precio_compra", 0),
-                        "stock_actual": v.get("stock_actual", 0),
-                    })
-                if len(results) >= limit:
-                    break
-
+            break
     return results
 
 

@@ -21,3 +21,4 @@ class FacturacionState:
         self.history_filter: str = ""
         self.items_controls: list[dict] = []
         self.original_total: float = 0.0
+        self.history_show_all: bool = False

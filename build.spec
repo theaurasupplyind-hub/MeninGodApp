@@ -46,6 +46,7 @@ datas = [
     (str(FLET_ASSETS / "bin"),      "flet/bin"),
     (str(PROJECT_DIR / "assets"), "assets"),
     (str(PROJECT_DIR / "services" / "invoice_template.html"), "services"),
+    (str(PROJECT_DIR / "icon.ico"), "."),
 ]
 
 hiddenimports = [
@@ -120,7 +121,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,
+    icon=str(PROJECT_DIR / "icon.ico"),
     version_file=None,
 )
 

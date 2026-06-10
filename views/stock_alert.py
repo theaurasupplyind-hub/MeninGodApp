@@ -7,6 +7,7 @@ Uso:
     # Llamar bell.refresh() cuando se quiera actualizar el badge
 """
 import flet as ft
+from theme import get_theme
 from db.database import get_stock_bajo
 
 
@@ -22,10 +23,10 @@ class StockAlertBell:
     def __init__(self, page: ft.Page, on_go_stock=None):
         self._page = page
         self._on_go_stock = on_go_stock
-        self._badge_text = ft.Text("", size=9, color=ft.colors.WHITE, weight=ft.FontWeight.W_700)
+        self._badge_text = ft.Text("", size=9, color=ft.Colors.WHITE, weight=ft.FontWeight.W_700)
         self._badge = ft.Container(
             content=self._badge_text,
-            bgcolor=ft.colors.RED_600,
+            bgcolor=ft.Colors.RED_600,
             border_radius=99,
             width=16,
             height=16,
@@ -34,9 +35,9 @@ class StockAlertBell:
             # Posicionado sobre el ícono via Stack
         )
         self._icon_btn = ft.IconButton(
-            icon=ft.icons.NOTIFICATIONS_NONE_OUTLINED,
+            icon=ft.Icons.NOTIFICATIONS_NONE_OUTLINED,
             icon_size=22,
-            icon_color=ft.colors.GREY_600,
+            icon_color=ft.Colors.GREY_600,
             tooltip="Alertas de stock",
             style=ft.ButtonStyle(padding=ft.padding.all(6)),
             on_click=self._open_panel,
@@ -62,14 +63,15 @@ class StockAlertBell:
         self._badge_text.value = str(count) if count < 10 else "9+"
         self._badge.visible = count > 0
         self._icon_btn.icon = (
-            ft.icons.NOTIFICATIONS_ACTIVE if count > 0
-            else ft.icons.NOTIFICATIONS_NONE_OUTLINED
+            ft.Icons.NOTIFICATIONS_ACTIVE if count > 0
+            else ft.Icons.NOTIFICATIONS_NONE_OUTLINED
         )
-        self._icon_btn.icon_color = ft.colors.ORANGE_700 if count > 0 else ft.colors.GREY_600
+        self._icon_btn.icon_color = ft.Colors.ORANGE_700 if count > 0 else ft.Colors.GREY_600
         if self.control.parent:
             self.control.update()
 
     def _open_panel(self, e):
+        t = get_theme(self._page)
         alertas = get_stock_bajo()
 
         if not alertas:
@@ -77,8 +79,8 @@ class StockAlertBell:
                 ft.Container(
                     content=ft.Row(
                         [
-                            ft.Icon(ft.icons.CHECK_CIRCLE_OUTLINE, color=ft.colors.GREEN_600, size=20),
-                            ft.Text("Todo el stock está en orden.", size=13, color=ft.colors.GREY_700),
+                            ft.Icon(ft.Icons.CHECK_CIRCLE_OUTLINE, color=ft.Colors.GREEN_600, size=20),
+                            ft.Text("Todo el stock está en orden.", size=13, color=t["text_secondary"]),
                         ],
                         spacing=8,
                     ),
@@ -98,9 +100,9 @@ class StockAlertBell:
                             [
                                 ft.Container(
                                     ft.Icon(
-                                        ft.icons.WARNING_AMBER_ROUNDED if not sin_stock else ft.icons.REMOVE_CIRCLE_OUTLINE,
+                                        ft.Icons.WARNING_AMBER_ROUNDED if not sin_stock else ft.Icons.REMOVE_CIRCLE_OUTLINE,
                                         size=18,
-                                        color=ft.colors.RED_700 if sin_stock else ft.colors.ORANGE_700,
+                                        color=ft.Colors.RED_700 if sin_stock else ft.Colors.ORANGE_700,
                                     ),
                                     width=28,
                                 ),
@@ -110,7 +112,7 @@ class StockAlertBell:
                                         ft.Text(
                                             f"Stock: {_fmt_stock(actual)}  |  Mínimo: {_fmt_stock(minimo)}",
                                             size=11,
-                                            color=ft.colors.GREY_600,
+                                            color=t["text_secondary"],
                                         ),
                                     ],
                                     spacing=2,
@@ -120,10 +122,10 @@ class StockAlertBell:
                                     ft.Text(
                                         "Sin stock" if sin_stock else "Stock bajo",
                                         size=10,
-                                        color=ft.colors.RED_700 if sin_stock else ft.colors.ORANGE_700,
+                                        color=t["badge_sin_stock"][1] if sin_stock else t["badge_bajo"][1],
                                         weight=ft.FontWeight.W_600,
                                     ),
-                                    bgcolor=ft.colors.RED_50 if sin_stock else ft.colors.ORANGE_50,
+                                    bgcolor=t["badge_sin_stock"][0] if sin_stock else t["badge_bajo"][0],
                                     border_radius=20,
                                     padding=ft.padding.symmetric(3, 8),
                                 ),
@@ -131,15 +133,12 @@ class StockAlertBell:
                             spacing=8,
                         ),
                         padding=ft.padding.symmetric(10, 4),
-                        border=ft.border.only(bottom=ft.border.BorderSide(0.5, ft.colors.GREY_100)),
+                        border=ft.border.only(bottom=ft.border.BorderSide(0.5, t["border_light"])),
                     )
                 )
 
         def _ir_stock(ev, d):
-            d.open = False
-            if d in self._page.overlay:
-                self._page.overlay.remove(d)
-            self._page.update()
+            self._page.close(d)
             if self._on_go_stock:
                 self._on_go_stock()
 
@@ -151,11 +150,12 @@ class StockAlertBell:
 
         dlg = ft.AlertDialog(
             modal=False,
+            bgcolor=t["bg_card"],
             title=ft.Row(
                 [
                     ft.Icon(
-                        ft.icons.NOTIFICATIONS_ACTIVE if alertas else ft.icons.NOTIFICATIONS_NONE_OUTLINED,
-                        color=ft.colors.ORANGE_700 if alertas else ft.colors.GREY_500,
+                        ft.Icons.NOTIFICATIONS_ACTIVE if alertas else ft.Icons.NOTIFICATIONS_NONE_OUTLINED,
+                        color=ft.Colors.ORANGE_700 if alertas else ft.Colors.GREY_500,
                         size=20,
                     ),
                     ft.Text(title_text, size=15, weight=ft.FontWeight.W_600, expand=True),
@@ -172,14 +172,14 @@ class StockAlertBell:
                 height=min(80 + len(alertas) * 60, 400),
             ),
             actions=[
-                ft.TextButton("Cerrar", on_click=lambda ev: (setattr(dlg, 'open', False), self._page.overlay.remove(dlg) if dlg in self._page.overlay else None, self._page.update())),
+                ft.TextButton("Cerrar", on_click=lambda ev: self._page.close(dlg)),
                 *(
                     [
                         ft.ElevatedButton(
                             "Ir a Productos",
-                            icon=ft.icons.INVENTORY_2_OUTLINED,
-                            bgcolor=ft.colors.BLUE_700,
-                            color=ft.colors.WHITE,
+                            icon=ft.Icons.INVENTORY_2_OUTLINED,
+                            bgcolor=ft.Colors.BLUE_700,
+                            color=ft.Colors.WHITE,
                             on_click=lambda ev: _ir_stock(ev, dlg),
                         )
                     ]
@@ -189,6 +189,4 @@ class StockAlertBell:
             ],
             actions_alignment=ft.MainAxisAlignment.END,
         )
-        self._page.overlay.append(dlg)
-        dlg.open = True
-        self._page.update()
+        self._page.open(dlg)

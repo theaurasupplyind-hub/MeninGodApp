@@ -74,6 +74,8 @@ def init_db():
     existing_fi_cols = {row[1] for row in c.execute("PRAGMA table_info(factura_items)")}
     if "producto_id" not in existing_fi_cols:
         c.execute("ALTER TABLE factura_items ADD COLUMN producto_id INTEGER DEFAULT NULL")
+    if "curva_color_ids" not in existing_fi_cols:
+        c.execute("ALTER TABLE factura_items ADD COLUMN curva_color_ids TEXT DEFAULT NULL")
 
     c.execute("""
         CREATE TABLE IF NOT EXISTS cuenta_corriente (
@@ -222,6 +224,8 @@ def init_db():
         c.execute("ALTER TABLE facturas ADD COLUMN localidad_id INTEGER DEFAULT NULL")
     if "fecha_envio" not in existing_cols:
         c.execute("ALTER TABLE facturas ADD COLUMN fecha_envio TEXT DEFAULT ''")
+    if "envio_estado" not in existing_cols:
+        c.execute("ALTER TABLE facturas ADD COLUMN envio_estado TEXT DEFAULT 'No enviado'")
 
     existing_clientes_cols = {row[1] for row in c.execute("PRAGMA table_info(clientes)")}
     if "localidad_id" not in existing_clientes_cols:
@@ -243,10 +247,6 @@ def init_db():
     if "activo" not in existing_var_cols:
         c.execute("ALTER TABLE variantes ADD COLUMN activo INTEGER NOT NULL DEFAULT 1")
 
-    existing_ci_cols = {row[1] for row in c.execute("PRAGMA table_info(compra_items)")}
-    if "variante_id" not in existing_ci_cols:
-        c.execute("ALTER TABLE compra_items ADD COLUMN variante_id INTEGER DEFAULT NULL")
-
     # ── Seed data for colores / tallas ───────────────────────────────────────
     colores_default = [
         ("Negro", "#000000"), ("Blanco", "#FFFFFF"), ("Rojo", "#E53935"),
@@ -260,6 +260,54 @@ def init_db():
     for nombre in tallas_default:
         c.execute("INSERT OR IGNORE INTO tallas (nombre) VALUES (?)", (nombre,))
 
+    # -- Migrate compra_items columns -----------------------------------------
+    existing_ci_cols = {row[1] for row in c.execute("PRAGMA table_info(compra_items)")}
+    if "variante_id" not in existing_ci_cols:
+        c.execute("ALTER TABLE compra_items ADD COLUMN variante_id INTEGER DEFAULT NULL")
+    for col in ["producto_id", "color_id", "talla_id"]:
+        if col not in existing_ci_cols:
+            c.execute(f"ALTER TABLE compra_items ADD COLUMN {col} INTEGER DEFAULT NULL")
+
+    # -- Create missing tables ------------------------------------------------
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre      TEXT NOT NULL UNIQUE,
+            pin         TEXT NOT NULL,
+            created_at  TEXT DEFAULT (datetime('now','localtime'))
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS sesiones (
+            id          TEXT PRIMARY KEY,
+            usuario_id  INTEGER NOT NULL,
+            inicio      TEXT DEFAULT (datetime('now','localtime')),
+            fin         TEXT
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS movimientos_stock (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            variante_id       INTEGER,
+            producto_id       INTEGER,
+            tipo              TEXT NOT NULL,
+            referencia        TEXT DEFAULT '',
+            cantidad          REAL NOT NULL,
+            stock_resultante  REAL DEFAULT 0,
+            motivo            TEXT DEFAULT '',
+            created_at        TEXT DEFAULT (datetime('now','localtime'))
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS actividad (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario_id  INTEGER,
+            tipo        TEXT NOT NULL,
+            referencia  TEXT DEFAULT '',
+            descripcion TEXT DEFAULT '',
+            created_at  TEXT DEFAULT (datetime('now','localtime'))
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -339,8 +387,8 @@ def save_factura(data: dict, items: list) -> str:
             prod_row = c.fetchone()
             producto_id = prod_row["id"] if prod_row else None
             c.execute("""
-                INSERT INTO factura_items (factura_id, cantidad, detalle, precio_unitario, total, producto_id)
-                VALUES (?,?,?,?,?,?)
+                INSERT INTO factura_items (factura_id, cantidad, detalle, precio_unitario, total, producto_id, curva_color_ids)
+                VALUES (?,?,?,?,?,?,?)
             """, (
                 factura_id,
                 item.get("cantidad", 1),
@@ -348,6 +396,7 @@ def save_factura(data: dict, items: list) -> str:
                 item.get("precio_unitario", 0),
                 item.get("total", 0),
                 producto_id,
+                item.get("curva_color_ids"),
             ))
     _update_cliente_empresa_envio(conn, data.get("cliente", ""), data.get("empresa_envio", ""))
     conn.commit()
@@ -402,8 +451,8 @@ def update_factura(numero: str, data: dict, items: list) -> str:
             prod_row = c.fetchone()
             producto_id = prod_row["id"] if prod_row else None
             c.execute("""
-                INSERT INTO factura_items (factura_id, cantidad, detalle, precio_unitario, total, producto_id)
-                VALUES (?,?,?,?,?,?)
+                INSERT INTO factura_items (factura_id, cantidad, detalle, precio_unitario, total, producto_id, curva_color_ids)
+                VALUES (?,?,?,?,?,?,?)
             """, (
                 factura_id,
                 item.get("cantidad", 1),
@@ -411,6 +460,7 @@ def update_factura(numero: str, data: dict, items: list) -> str:
                 item.get("precio_unitario", 0),
                 item.get("total", 0),
                 producto_id,
+                item.get("curva_color_ids"),
             ))
 
     _update_cliente_empresa_envio(conn, data.get("cliente", ""), data.get("empresa_envio", ""))
@@ -576,6 +626,14 @@ def get_producto_by_detalle(detalle: str) -> dict | None:
     conn.close()
     return dict(row) if row else None
 
+
+def get_producto_by_id(producto_id: int) -> dict | None:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM productos WHERE id = ?", (producto_id,))
+    row = c.fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 def save_producto(data: dict) -> int:
     existing = get_producto_by_detalle(data.get("detalle", ""))
@@ -746,6 +804,51 @@ def revertir_stock_factura(numero_factura: str):
             (cantidad, prod_id)
         )
 
+    conn.commit()
+    conn.close()
+
+
+def procesar_stock_curva_color(numero_factura: str, items_controls: list) -> None:
+    """Deduct variant stock for per-color curva items after saving."""
+    conn = get_connection()
+    c = conn.cursor()
+    for item in items_controls:
+        ccm = item.get("curva_color_metadata", {}).get("value")
+        if not ccm:
+            continue
+        cantidad = float(item["cant"].value or "1")
+        for vid in ccm["variante_ids"]:
+            c.execute(
+                "UPDATE variantes SET stock_actual = MAX(0, COALESCE(stock_actual,0) - ?) WHERE id = ?",
+                (cantidad, int(vid))
+            )
+    conn.commit()
+    conn.close()
+
+
+def revertir_stock_curva_color(numero: str) -> None:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute(
+        """SELECT fi.cantidad, fi.curva_color_ids
+           FROM factura_items fi
+           JOIN facturas f ON f.id = fi.factura_id
+           WHERE f.numero = ? AND fi.curva_color_ids IS NOT NULL""",
+        (numero,)
+    )
+    for row in c.fetchall():
+        cantidad = float(row["cantidad"] or 0)
+        ids_str = row["curva_color_ids"]
+        if not ids_str or cantidad <= 0:
+            continue
+        for vid in ids_str.split(","):
+            vid = vid.strip()
+            if not vid:
+                continue
+            c.execute(
+                "UPDATE variantes SET stock_actual = COALESCE(stock_actual,0) + ? WHERE id = ?",
+                (cantidad, int(vid))
+            )
     conn.commit()
     conn.close()
 
@@ -1170,8 +1273,8 @@ def save_compra(data: dict, items: list) -> str:
     for item in items:
         if item.get("detalle", "").strip():
             c.execute("""
-                INSERT INTO compra_items (compra_id, cantidad, detalle, precio_unitario, total, variante_id)
-                VALUES (?,?,?,?,?,?)
+                INSERT INTO compra_items (compra_id, cantidad, detalle, precio_unitario, total, variante_id, producto_id, color_id, talla_id)
+                VALUES (?,?,?,?,?,?,?,?,?)
             """, (
                 compra_id,
                 item.get("cantidad", 1),
@@ -1179,6 +1282,9 @@ def save_compra(data: dict, items: list) -> str:
                 item.get("precio_unitario", 0),
                 item.get("total", 0),
                 item.get("variante_id"),
+                item.get("_producto_id"),
+                item.get("_color_id"),
+                item.get("_talla_id"),
             ))
 
             detalle = item.get("detalle", "").strip()
@@ -1295,7 +1401,7 @@ def update_compra(numero: str, data: dict, items: list) -> str:
     # Revertir cuenta corriente proveedor vieja
     if old_proveedor_id and old_total > 0:
         saldo_previo = _saldo_actual_proveedor(old_proveedor_id, c)
-        nuevo_saldo = saldo_previo - old_total
+        nuevo_saldo = saldo_previo + old_total
         c.execute("""
             INSERT INTO cuenta_corriente_proveedores
                 (proveedor_id, fecha, tipo, referencia, descripcion, debe, haber, saldo)
@@ -1306,8 +1412,8 @@ def update_compra(numero: str, data: dict, items: list) -> str:
             "Ajuste",
             numero,
             f"Reversión compra {numero}",
-            0,
             old_total,
+            0,
             nuevo_saldo,
         ))
 
@@ -1344,8 +1450,8 @@ def update_compra(numero: str, data: dict, items: list) -> str:
     for item in items:
         if item.get("detalle", "").strip():
             c.execute("""
-                INSERT INTO compra_items (compra_id, cantidad, detalle, precio_unitario, total, variante_id)
-                VALUES (?,?,?,?,?,?)
+                INSERT INTO compra_items (compra_id, cantidad, detalle, precio_unitario, total, variante_id, producto_id, color_id, talla_id)
+                VALUES (?,?,?,?,?,?,?,?,?)
             """, (
                 old_id,
                 item.get("cantidad", 1),
@@ -1353,6 +1459,9 @@ def update_compra(numero: str, data: dict, items: list) -> str:
                 item.get("precio_unitario", 0),
                 item.get("total", 0),
                 item.get("variante_id"),
+                item.get("_producto_id"),
+                item.get("_color_id"),
+                item.get("_talla_id"),
             ))
 
             detalle = item.get("detalle", "").strip()
@@ -1430,7 +1539,7 @@ def delete_compra(numero: str):
     # Revertir cuenta corriente
     if proveedor_id and total > 0:
         saldo_previo = _saldo_actual_proveedor(proveedor_id, c)
-        nuevo_saldo = saldo_previo - total
+        nuevo_saldo = saldo_previo + total
         c.execute("""
             INSERT INTO cuenta_corriente_proveedores
                 (proveedor_id, fecha, tipo, referencia, descripcion, debe, haber, saldo)
@@ -1441,8 +1550,8 @@ def delete_compra(numero: str):
             "Ajuste",
             numero,
             f"Eliminación compra {numero}",
-            0,
             total,
+            0,
             nuevo_saldo,
         ))
 
@@ -1890,5 +1999,350 @@ def resolver_curva(curva_id: int, distribucion: list[dict]) -> None:
                 (delta, d["variante_id"])
             )
     c.execute("UPDATE curvas_pendientes SET resuelta = 1 WHERE id = ?", (curva_id,))
+    conn.commit()
+    conn.close()
+
+
+# ── User / Auth ─────────────────────────────────────────────────────────────────
+
+def get_usuarios() -> list:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT id, nombre, created_at FROM usuarios ORDER BY id")
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_usuario_by_nombre(nombre: str) -> dict | None:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM usuarios WHERE nombre = ?", (nombre,))
+    row = c.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def crear_usuario(nombre: str, pin: str):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("INSERT INTO usuarios (nombre, pin) VALUES (?,?)", (nombre, pin))
+    conn.commit()
+    conn.close()
+
+
+def verificar_pin(nombre: str, pin: str) -> dict | None:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM usuarios WHERE nombre = ? AND pin = ?", (nombre, pin))
+    row = c.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def registrar_sesion(usuario_id: int) -> str:
+    import uuid
+    session_id = str(uuid.uuid4())
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("INSERT INTO sesiones (id, usuario_id, inicio) VALUES (?,?, datetime('now','localtime'))", (session_id, usuario_id))
+    conn.commit()
+    conn.close()
+    return session_id
+
+
+def cerrar_sesion(session_id: str):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE sesiones SET fin = datetime('now','localtime') WHERE id = ?", (session_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_usuarios_conectados() -> list:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        SELECT s.id AS session_id, u.id AS usuario_id, u.nombre, s.inicio
+        FROM sesiones s
+        JOIN usuarios u ON u.id = s.usuario_id
+        WHERE s.fin IS NULL
+        ORDER BY s.inicio DESC
+    """)
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
+
+
+def registrar_actividad(usuario_id: int, tipo: str, referencia: str = "", descripcion: str = ""):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO actividad (usuario_id, tipo, referencia, descripcion)
+        VALUES (?,?,?,?)
+    """, (usuario_id, tipo, referencia, descripcion))
+    conn.commit()
+    conn.close()
+
+
+# ── Actividad reciente ──────────────────────────────────────────────────────────
+
+def get_actividad_reciente(limit: int = 50) -> list:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        SELECT a.*, u.nombre AS usuario_nombre
+        FROM actividad a
+        LEFT JOIN usuarios u ON u.id = a.usuario_id
+        ORDER BY a.id DESC LIMIT ?
+    """, (limit,))
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_actividad_reciente_days(days: int = 60, limit: int = 200) -> list:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        SELECT a.*, u.nombre AS usuario_nombre
+        FROM actividad a
+        LEFT JOIN usuarios u ON u.id = a.usuario_id
+        WHERE a.created_at >= datetime('now', ? || ' days', 'localtime')
+        ORDER BY a.id DESC LIMIT ?
+    """, (f"-{days}", limit))
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
+
+
+# ── Facturas ────────────────────────────────────────────────────────────────────
+
+def update_factura_envio(factura_id: int, envio_estado: str):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE facturas SET envio_estado = ? WHERE id = ?", (envio_estado, factura_id))
+    conn.commit()
+    conn.close()
+
+
+def get_pagos_by_factura(numero_factura: str) -> list:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute(
+        "SELECT * FROM cuenta_corriente WHERE referencia = ? AND tipo = 'Pago' ORDER BY id DESC",
+        (numero_factura,)
+    )
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
+
+
+def delete_factura(numero: str):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM facturas WHERE numero = ?", (numero,))
+    factura = c.fetchone()
+    if not factura:
+        conn.close()
+        return
+    factura = dict(factura)
+    c.execute("SELECT * FROM factura_items WHERE factura_id = ?", (factura["id"],))
+    items = [dict(r) for r in c.fetchall()]
+    for item in items:
+        pid = item.get("producto_id")
+        if pid:
+            c.execute(
+                "UPDATE productos SET stock_actual = MAX(0, COALESCE(stock_actual,0) + ?) WHERE id = ?",
+                (item["cantidad"], pid)
+            )
+    c.execute("DELETE FROM factura_items WHERE factura_id = ?", (factura["id"],))
+    c.execute("DELETE FROM facturas WHERE id = ?", (factura["id"],))
+    conn.commit()
+    conn.close()
+
+
+# ── Cliente CC ─────────────────────────────────────────────────────────────────
+
+def get_facturas_pendientes_cliente(cliente_nombre: str) -> list:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        SELECT f.id, f.numero, f.total, f.seña
+        FROM facturas f
+        WHERE f.cliente_nombre = ? AND f.estado != 'Pagado'
+        ORDER BY f.id DESC
+    """, (cliente_nombre,))
+    rows = []
+    for row in [dict(r) for r in c.fetchall()]:
+        c.execute(
+            "SELECT COALESCE(SUM(haber), 0) FROM cuenta_corriente WHERE referencia = ? AND tipo = 'Pago'",
+            (row["numero"],)
+        )
+        pagado = float(c.fetchone()[0] or 0)
+        deuda = max(0, row["total"] - float(row.get("seña", 0) or 0) - pagado)
+        if deuda > 0:
+            row["deuda"] = deuda
+            rows.append(row)
+    conn.close()
+    return rows
+
+
+def update_movimiento_cc(mov_id: int, monto: float, descripcion: str):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute(
+        "UPDATE cuenta_corriente SET haber = ?, descripcion = ? WHERE id = ?",
+        (monto, descripcion, mov_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_movimiento_cc(mov_id: int):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM cuenta_corriente WHERE id = ?", (mov_id,))
+    conn.commit()
+    conn.close()
+
+
+def anular_cobro(cobro_id: int):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM cuenta_corriente WHERE id = ?", (cobro_id,))
+    mov = c.fetchone()
+    if not mov:
+        conn.close()
+        return
+    mov = dict(mov)
+    c.execute("DELETE FROM cuenta_corriente WHERE id = ?", (cobro_id,))
+    if mov.get("referencia"):
+        c.execute(
+            "UPDATE facturas SET estado = 'Pendiente' WHERE numero = ?",
+            (mov["referencia"],)
+        )
+    c.execute(
+        "DELETE FROM movimientos_wasi WHERE concepto LIKE ? AND monto = ?",
+        (f"%{mov.get('referencia', '')}%", float(mov.get("haber", 0) or 0))
+    )
+    conn.commit()
+    conn.close()
+
+
+# ── Stock movements ─────────────────────────────────────────────────────────────
+
+def registrar_movimiento_stock(
+    variante_id: int,
+    tipo: str,
+    referencia: str | None = None,
+    cantidad: float = 0,
+    motivo: str | None = None,
+):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT stock_actual FROM variantes WHERE id = ?", (variante_id,))
+    row = c.fetchone()
+    stock_resultante = float(row[0]) if row else 0
+    c.execute("""
+        INSERT INTO movimientos_stock (variante_id, tipo, referencia, cantidad, stock_resultante, motivo)
+        VALUES (?,?,?,?,?,?)
+    """, (variante_id, tipo, referencia or "", cantidad, stock_resultante, motivo or ""))
+    conn.commit()
+    conn.close()
+
+
+def get_movimientos_stock(variante_id: int = 0, producto_id: int = 0) -> list:
+    conn = get_connection()
+    c = conn.cursor()
+    if producto_id:
+        c.execute("""
+            SELECT ms.* FROM movimientos_stock ms
+            JOIN variantes v ON v.id = ms.variante_id
+            WHERE v.producto_id = ?
+            ORDER BY ms.id DESC
+        """, (producto_id,))
+    else:
+        c.execute(
+            "SELECT * FROM movimientos_stock WHERE variante_id = ? ORDER BY id DESC",
+            (variante_id,)
+        )
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_movimientos_by_producto(producto_id: int) -> list:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        SELECT ms.* FROM movimientos_stock ms
+        JOIN variantes v ON v.id = ms.variante_id
+        WHERE v.producto_id = ?
+        ORDER BY ms.id DESC
+    """, (producto_id,))
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_curvas_by_producto(producto_id: int) -> list:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute(
+        "SELECT * FROM curvas_pendientes WHERE producto_id = ? AND resuelta = 0 ORDER BY id",
+        (producto_id,)
+    )
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
+
+
+# ── Proveedor CC ────────────────────────────────────────────────────────────────
+
+def get_saldo_proveedor(proveedor_id: int) -> float:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute(
+        "SELECT COALESCE(SUM(debe - haber), 0) FROM cuenta_corriente_proveedores WHERE proveedor_id = ?",
+        (proveedor_id,)
+    )
+    saldo = float(c.fetchone()[0] or 0)
+    conn.close()
+    return saldo
+
+
+def get_compras_by_proveedor(proveedor_id: int) -> list:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        SELECT c.id, c.numero, c.fecha, c.total,
+               GROUP_CONCAT(ci.detalle, ', ') AS resumen
+        FROM compras c
+        LEFT JOIN compra_items ci ON ci.compra_id = c.id
+        WHERE c.proveedor_id = ?
+        GROUP BY c.id
+        ORDER BY c.id DESC
+    """, (proveedor_id,))
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
+
+
+def update_movimiento_proveedor(mov_id: int, monto: float, descripcion: str):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute(
+        "UPDATE cuenta_corriente_proveedores SET debe = ?, descripcion = ? WHERE id = ?",
+        (monto, descripcion, mov_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_movimiento_proveedor(mov_id: int):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM cuenta_corriente_proveedores WHERE id = ?", (mov_id,))
     conn.commit()
     conn.close()

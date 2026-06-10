@@ -21,16 +21,22 @@ from pathlib import Path
 from typing import Callable
 
 import flet as ft
+from theme import get_theme
 
 from db.database import (
+    get_connection,
     get_factura_by_numero,
     get_facturas,
+    get_variante_by_id,
     save_factura,
     save_from_factura,
     update_factura,
+    delete_factura,
     procesar_stock_factura,
+    registrar_movimiento_wasi,
     revertir_stock_factura,
     save_curva_pendiente,
+    get_pagos_by_factura,
 )
 
 from services.autocomplete_service import search_clientes
@@ -40,8 +46,9 @@ from services.whatsapp_service import (
     paste_clipboard_image,
     share_invoice,
 )
+from services.auth_service import AuthService
 from views.facturacion.components.autocomplete import AutocompleteField
-from views.facturacion.components.item_row import build_item_row
+from views.facturacion.components.item_row import build_item_row, update_row_zebra
 from views.facturacion.state import FacturacionState
 
 log = logging.getLogger("mvp10")
@@ -52,8 +59,7 @@ log = logging.getLogger("mvp10")
 def fmt(val) -> str:
     """Formatea un numero como $1.234.567 (separador de miles con punto)."""
     try:
-        cleaned = str(val).replace(".", "").replace(",", ".") or "0"
-        return ("$" + f"{int(float(cleaned)):,}").replace(",", ".")
+        return ("$" + f"{int(float(val)):,}").replace(",", ".")
     except Exception:
         return "$0"
 
@@ -156,12 +162,12 @@ class FacturacionController:
             except Exception as exc:
                 log.debug(f"safe_update ignored: {exc}")
 
-    def _show_message(self, text: str, color=ft.colors.PRIMARY) -> None:
+    def _show_message(self, text: str, color=ft.Colors.PRIMARY) -> None:
         page = self._ui.page
         if page is None:
             return
         sb = ft.SnackBar(
-            ft.Text(text, color=ft.colors.ON_PRIMARY),
+            ft.Text(text, color=ft.Colors.ON_PRIMARY),
             bgcolor=color,
             duration=3200,
         )
@@ -174,7 +180,7 @@ class FacturacionController:
             return
         self._s.is_saved = False
         self._ui.status_chip.value = "Sin guardar"
-        self._ui.status_chip.color = ft.colors.TERTIARY
+        self._ui.status_chip.color = ft.Colors.TERTIARY
         self._safe_update(self._ui.status_chip)
 
     def _set_saved_state(self, numero: str) -> None:
@@ -182,7 +188,7 @@ class FacturacionController:
         self._s.is_saved = True
         self._ui.numero_text.value = numero
         self._ui.status_chip.value = "Guardada"
-        self._ui.status_chip.color = ft.colors.PRIMARY
+        self._ui.status_chip.color = ft.Colors.PRIMARY
         self._safe_update(self._ui.numero_text)
         self._safe_update(self._ui.status_chip)
 
@@ -190,7 +196,7 @@ class FacturacionController:
         self._s.is_saved = False
         self._s.current_numero = None
         self._ui.status_chip.value = "Sin guardar"
-        self._ui.status_chip.color = ft.colors.TERTIARY
+        self._ui.status_chip.color = ft.Colors.TERTIARY
         self._safe_update(self._ui.status_chip)
 
     def _set_next_numero(self) -> None:
@@ -207,18 +213,26 @@ class FacturacionController:
     # ── Coleccion de datos ─────────────────────────────────────────────────────
 
     def collect_items(self) -> list[dict]:
-        return [
-            {
-                "cantidad": parse_num(item["cant"].value or "1"),
-                "detalle": item["detalle_ac"].value or "",
-                "precio_unitario": parse_num(item["precio"].value),
-                "total": parse_num(
-                    item["total_tf"].value.replace("$", "").replace(".", "")
-                ),
-            }
-            for item in self._s.items_controls
-            if (item["detalle_ac"].value or "").strip()
-        ]
+        result = []
+        for item in self._s.items_controls:
+            detalle = (item["detalle_ac"].value or "").strip()
+            if not detalle:
+                continue
+            producto_id = item.get("producto_id")
+            variante_id = item.get("variante_id")
+            is_note = producto_id is None
+            cant = parse_num(item["cant"].value or "1")
+            precio = parse_num(item["precio"].value)
+            result.append({
+                "cantidad": cant,
+                "detalle": detalle,
+                "precio_unitario": precio,
+                "total": cant * precio,
+                "producto_id": producto_id,
+                "variante_id": variante_id,
+                "is_note": is_note,
+            })
+        return result
 
     def collect_factura_data(self) -> dict:
         return {
@@ -233,6 +247,42 @@ class FacturacionController:
             "fecha_estimada": "",
             "empresa_envio": self._ui.tf_transporte.value or "",
         }
+
+    def _factura_has_changes(self, items_data: list, data: dict) -> bool:
+        saved = get_factura_by_numero(self._s.current_numero)
+        if not saved:
+            return True
+
+        header_map = {
+            "cliente_nombre": data.get("cliente", ""),
+            "domicilio": data.get("domicilio", ""),
+            "telefono": data.get("telefono", ""),
+            "fecha": data.get("fecha", ""),
+            "seña": data.get("seña", 0),
+            "empresa_envio": data.get("empresa_envio", ""),
+        }
+        for db_key, ui_val in header_map.items():
+            saved_val = saved.get(db_key, "")
+            if str(saved_val or "") != str(ui_val or ""):
+                return True
+
+        stock_items_ui = set()
+        for item in items_data:
+            if not item.get("is_note") and item.get("variante_id"):
+                stock_items_ui.add((
+                    item["variante_id"],
+                    float(item.get("cantidad", 0)),
+                ))
+
+        stock_items_db = set()
+        for item in saved.get("items", []):
+            if item.get("variante_id"):
+                stock_items_db.add((
+                    item["variante_id"],
+                    float(item.get("cantidad", 0)),
+                ))
+
+        return stock_items_ui != stock_items_db
 
     # ── Items ──────────────────────────────────────────────────────────────────
 
@@ -259,9 +309,9 @@ class FacturacionController:
             self.mark_dirty()
 
     def _renumber_rows(self) -> None:
-        for idx, item in enumerate(self._s.items_controls, start=1):
-            item["index_text"].value = str(idx)
-            self._safe_update(item["index_text"])
+        for idx, item in enumerate(self._s.items_controls):
+            update_row_zebra(item, idx, self._ui.t)
+            self._safe_update(item["row"])
 
     def remove_item(self, item_data: dict) -> None:
         if item_data in self._s.items_controls:
@@ -273,7 +323,6 @@ class FacturacionController:
         self._safe_update(self._ui.items_col)
 
     def add_item(self, initial: dict | None = None, auto_focus: bool = False) -> None:
-        index = len(self._s.items_controls) + 1
         
         # Callback para cuando el usuario presiona Enter en el precio de esta fila
         def _on_row_complete():
@@ -301,12 +350,12 @@ class FacturacionController:
 
         item_data = build_item_row(
             page=self._ui.page,
-            index=index,
             initial=initial,
             on_remove=self.remove_item,
             on_change=lambda: self.recalculate(mark_dirty=True),
             on_row_complete=_on_row_complete,
             t=self._ui.t,
+            row_index=len(self._s.items_controls),
         )
         self._s.items_controls.append(item_data)
         self._ui.items_col.controls.append(item_data["row"])
@@ -336,11 +385,12 @@ class FacturacionController:
     # ── Historial ──────────────────────────────────────────────────────────────
 
     def set_history_filter(self, value: str) -> None:
+        self._s.history_show_all = False
         self._s.history_filter = (value or "").strip().lower()
         self.refresh_history()
 
     def _get_history_rows(self) -> list[dict]:
-        rows = get_facturas(200)
+        rows = get_facturas(100000)
         query = self._s.history_filter
         if not query:
             return rows
@@ -362,7 +412,7 @@ class FacturacionController:
         """
         rows = self._get_history_rows()
         if not rows:
-            self._show_message("No hay facturas en el historial.", ft.colors.TERTIARY)
+            self._show_message("No hay facturas en el historial.", ft.Colors.TERTIARY)
             return
         if not self._s.current_numero:
             self.load_factura(rows[0]["numero"])
@@ -378,12 +428,12 @@ class FacturacionController:
         if 0 <= next_index < len(rows):
             self.load_factura(rows[next_index]["numero"])
         else:
-            self._show_message("No hay mas facturas en esa direccion.", ft.colors.TERTIARY)
+            self._show_message("No hay mas facturas en esa direccion.", ft.Colors.TERTIARY)
 
     def load_factura(self, numero: str) -> None:
         factura = get_factura_by_numero(numero)
         if not factura:
-            self._show_message("No se pudo cargar la factura.", ft.colors.ERROR)
+            self._show_message("No se pudo cargar la factura.", ft.Colors.ERROR)
             return
 
         self._s.suppress_dirty = True
@@ -424,11 +474,12 @@ class FacturacionController:
 
     def _build_history_row_widget(self, row: dict, zebra: bool) -> ft.Container:
         is_active = self._s.current_numero == row["numero"]
+        t = self._ui.t
         return ft.Container(
             content=ft.Row(
                 [
-                    ft.Text(row["numero"], size=12, color=ft.colors.PRIMARY, width=62),
-                    ft.Text(row["fecha"], size=11, color=ft.colors.SECONDARY, width=72),
+                    ft.Text(row["numero"], size=12, color=t["accent"], width=62),
+                    ft.Text(row["fecha"], size=11, color=t["text_secondary"], width=72),
                     ft.Text(
                         row["cliente_nombre"] or "",
                         size=12,
@@ -448,12 +499,12 @@ class FacturacionController:
             ),
             padding=ft.padding.symmetric(7, 12),
             bgcolor=(
-                ft.colors.PRIMARY_CONTAINER
+                t["accent_light"]
                 if is_active
-                else (ft.colors.SURFACE if zebra else ft.colors.SURFACE_VARIANT)
+                else (t["bg_row_even"] if zebra else t["bg_row_odd"])
             ),
             border=ft.border.only(
-                bottom=ft.border.BorderSide(0.5, ft.colors.OUTLINE_VARIANT)
+                bottom=ft.border.BorderSide(0.5, t["border_light"])
             ),
             ink=True,
             on_click=lambda e, num=row["numero"]: self.load_factura(num),
@@ -461,7 +512,9 @@ class FacturacionController:
         )
 
     def refresh_history(self) -> None:
+        MOV_MAX = 100
         hc = self._ui.history_col
+        t = self._ui.t
         hc.controls.clear()
 
         # Cabecera
@@ -470,38 +523,41 @@ class FacturacionController:
                 ft.Row(
                     [
                         ft.Text("N°", size=11, weight=ft.FontWeight.W_500,
-                                color=ft.colors.SECONDARY, width=62),
+                                color=t["text_secondary"], width=62),
                         ft.Text("Fecha", size=11, weight=ft.FontWeight.W_500,
-                                color=ft.colors.SECONDARY, width=72),
+                                color=t["text_secondary"], width=72),
                         ft.Text("Cliente", size=11, weight=ft.FontWeight.W_500,
-                                color=ft.colors.SECONDARY, expand=True),
+                                color=t["text_secondary"], expand=True),
                         ft.Text("$", size=11, weight=ft.FontWeight.W_500,
-                                color=ft.colors.SECONDARY, width=70,
+                                color=t["text_secondary"], width=70,
                                 text_align=ft.TextAlign.RIGHT),
                     ],
                     spacing=4,
                 ),
                 padding=ft.padding.symmetric(8, 12),
-                bgcolor=ft.colors.SURFACE_VARIANT,
+                bgcolor=t["bg_header"],
                 border=ft.border.only(
-                    bottom=ft.border.BorderSide(0.5, ft.colors.OUTLINE_VARIANT)
+                    bottom=ft.border.BorderSide(0.5, t["border_light"])
                 ),
             )
         )
 
         rows = self._get_history_rows()
+        show_all = self._s.history_show_all
+        visible = rows if show_all else rows[:MOV_MAX]
+
         if not rows:
             hc.controls.append(
                 ft.Container(
                     content=ft.Column(
                         [
-                            ft.Icon(ft.icons.HISTORY, size=36, color=ft.colors.SECONDARY),
-                            ft.Text("Sin resultados.", size=14, weight=ft.FontWeight.W_500),
-                            ft.Text(
-                                "No encontramos facturas con ese filtro.",
-                                size=12,
-                                color=ft.colors.SECONDARY,
-                            ),
+                    ft.Icon(ft.Icons.HISTORY, size=36, color=t["text_secondary"]),
+                    ft.Text("Sin resultados.", size=14, weight=ft.FontWeight.W_500, color=t["text_primary"]),
+                    ft.Text(
+                        "No encontramos facturas con ese filtro.",
+                        size=12,
+                        color=t["text_secondary"],
+                    ),
                         ],
                         spacing=8,
                         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -512,10 +568,89 @@ class FacturacionController:
                 )
             )
         else:
-            for i, row in enumerate(rows):
+            for i, row in enumerate(visible):
                 hc.controls.append(self._build_history_row_widget(row, i % 2 == 0))
+            remaining = len(rows) - MOV_MAX
+            if remaining > 0 and not show_all:
+                def _load_more_hist(e):
+                    self._s.history_show_all = True
+                    self.refresh_history()
+                hc.controls.append(
+                    ft.Container(
+                        content=ft.ElevatedButton(
+                            f"Cargar más ({remaining} restantes)",
+                            on_click=_load_more_hist,
+                            style=ft.ButtonStyle(
+                                bgcolor=t.get("bg_header", t["bg_card"]),
+                                color=t["accent"],
+                                shape=ft.RoundedRectangleBorder(radius=8),
+                            ),
+                        ),
+                        alignment=ft.alignment.center,
+                        padding=ft.padding.all(10),
+                    )
+                )
 
         self._safe_update(hc)
+
+    # ── Verificación de stock ─────────────────────────────────────────────────
+
+    def _check_stock(self, items_data: list[dict]) -> bool:
+        """Check stock for product items. Returns True if OK, False if blocked."""
+        sin_stock = []
+        for item in items_data:
+            if item.get("is_note") or not item.get("variante_id"):
+                continue
+            variante = get_variante_by_id(item["variante_id"])
+            if not variante:
+                continue
+            stock_actual = float(variante.get("stock_actual", 0) or 0)
+            cantidad = float(item.get("cantidad", 1) or 1)
+            if stock_actual < cantidad:
+                detalle = item.get("detalle", "")
+                color = variante.get("color", "")
+                talle = variante.get("talla", "")
+                nombre = f"{detalle}"
+                if color or talle:
+                    nombre += f" {color} {talle}".strip()
+                sin_stock.append({
+                    "nombre": nombre,
+                    "cantidad": int(cantidad),
+                    "stock": int(stock_actual),
+                })
+        if not sin_stock:
+            return True
+        page = self._ui.page
+        if page is None:
+            return False
+        t = get_theme(page)
+        rows = []
+        for s in sin_stock:
+            rows.append(ft.Row([
+                ft.Text(s["nombre"], size=13, weight=ft.FontWeight.W_500, expand=True),
+                ft.Text(f"Pedido: {s['cantidad']}", size=12, color=ft.Colors.ERROR),
+                ft.Text(f"Stock: {s['stock']}", size=12, color=ft.Colors.ERROR),
+            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN))
+        dlg = ft.AlertDialog(
+            modal=True,
+            bgcolor=t["bg_card"],
+            title=ft.Text("Sin stock suficiente", size=16, weight=ft.FontWeight.BOLD),
+            content=ft.Container(
+                content=ft.Column([
+                    ft.Text("Los siguientes productos no tienen stock suficiente:",
+                            size=12, color=t["text_secondary"]),
+                    ft.Divider(height=4, color=t["border_light"]),
+                    *rows,
+                ], spacing=6, scroll=ft.ScrollMode.AUTO),
+                width=400,
+            ),
+            actions=[
+                ft.TextButton("Cerrar", on_click=lambda e: page.close(dlg)),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        page.open(dlg)
+        return False
 
     # ── Guardar ────────────────────────────────────────────────────────────────
 
@@ -523,10 +658,17 @@ class FacturacionController:
         items_data = self.collect_items()
         if not items_data:
             self._show_message(
-                "Agrega al menos un item antes de guardar.", ft.colors.TERTIARY
+                "Agrega al menos un item antes de guardar.", ft.Colors.TERTIARY
             )
             return
+        if not self._check_stock(items_data):
+            return
         data = self.collect_factura_data()
+
+        if self._s.current_numero and not self._factura_has_changes(items_data, data):
+            self._show_message("No hay cambios para guardar.", ft.Colors.SECONDARY)
+            return
+
         try:
             if self._s.current_numero:
                 revertir_stock_factura(self._s.current_numero)
@@ -539,6 +681,24 @@ class FacturacionController:
                 msg = f"Factura {numero} guardada correctamente"
 
             self._show_message(msg)
+
+            # ── Seña → WASI ────────────────────────────────────────────────
+            seña_val = data.get("seña", 0) or 0
+            if self._s.current_numero:
+                conn = get_connection()
+                conn.execute(
+                    "DELETE FROM movimientos_wasi WHERE concepto LIKE ? AND tipo = 'Ingreso'",
+                    (f"Seña — Factura {self._s.current_numero}%",)
+                )
+                conn.commit()
+                conn.close()
+            if seña_val > 0:
+                registrar_movimiento_wasi(
+                    tipo="Ingreso",
+                    categoria="Factura / Venta",
+                    concepto=f"Seña — Factura {numero} — {data.get('cliente', '')}",
+                    monto=seña_val,
+                )
 
             # ── Curvas pendientes ──────────────────────────────────────────
             factura = get_factura_by_numero(numero)
@@ -573,6 +733,12 @@ class FacturacionController:
             self.refresh_history()
             self._s.last_generated_image = None
 
+            AuthService().track(
+                "factura",
+                numero,
+                f"{'Actualizada' if self._s.current_numero else 'Creada'} factura {numero} — ${int(data.get('total', 0)):,}".replace(",", "."),
+            )
+
             if self._on_factura_guardada:
                 self._on_factura_guardada()
             if self._ui.page:
@@ -582,7 +748,54 @@ class FacturacionController:
                     pass
         except Exception as error:
             log.error(f"Error en save: {error}", exc_info=True)
-            self._show_message(f"Error al guardar: {error}", ft.colors.ERROR)
+            self._show_message(f"Error al guardar: {error}", ft.Colors.ERROR)
+
+    # ── Eliminar ──────────────────────────────────────────────────────────────
+
+    def delete(self, e=None) -> None:
+        if not self._s.current_numero:
+            self._show_message("No hay factura cargada para eliminar.", ft.Colors.TERTIARY)
+            return
+
+        pagos = get_pagos_by_factura(self._s.current_numero)
+        if pagos:
+            self._show_message(
+                f"Esta factura tiene {len(pagos)} pago(s) registrado(s). "
+                "Deshacé los pagos antes de eliminar.",
+                ft.Colors.ERROR,
+            )
+            return
+
+        numero = self._s.current_numero
+
+        def _do_delete(ev, d):
+            try:
+                delete_factura(numero)
+                self._show_message(f"Factura {numero} eliminada.", ft.Colors.RED_700)
+                self._ui.page.close(d) if self._ui.page else None
+                self.nueva()
+                if self._on_factura_guardada:
+                    self._on_factura_guardada()
+            except Exception as ex:
+                self._show_message(f"Error al eliminar: {ex}", ft.Colors.ERROR)
+
+        _t = get_theme(self._ui.page) if self._ui.page else {"bg_card": "#111827"}
+        dlg = ft.AlertDialog(
+            modal=True,
+            bgcolor=_t["bg_card"],
+            title=ft.Text("Eliminar factura"),
+            content=ft.Text(f"¿Seguro que querés eliminar la factura {numero}?\nSe revertirá el stock y la cuenta corriente."),
+            actions=[
+                ft.TextButton("Cancelar", on_click=lambda ev: self._ui.page.close(dlg) if self._ui.page else None),
+                ft.ElevatedButton(
+                    "Eliminar",
+                    bgcolor=ft.Colors.ERROR,
+                    on_click=lambda ev: _do_delete(ev, dlg),
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self._ui.page.open(dlg) if self._ui.page else None
 
     # ── Nueva ──────────────────────────────────────────────────────────────────
 
@@ -622,13 +835,13 @@ class FacturacionController:
         if not self._s.current_numero or not self._s.is_saved:
             self._show_message(
                 "Primero debes guardar la factura antes de compartir.",
-                ft.colors.TERTIARY,
+                ft.Colors.TERTIARY,
             )
             return None
         items_data = self.collect_items()
         if not items_data:
             self._show_message(
-                "La factura no tiene items para compartir.", ft.colors.TERTIARY
+                "La factura no tiene items para compartir.", ft.Colors.TERTIARY
             )
             return None
         data = self.collect_factura_data()
@@ -642,7 +855,7 @@ class FacturacionController:
             self._s.last_generated_image = str(image_path)
             return image_path
         except Exception as error:
-            self._show_message(f"No se pudo generar la imagen: {error}", ft.colors.ERROR)
+            self._show_message(f"No se pudo generar la imagen: {error}", ft.Colors.ERROR)
             return None
 
     def share_whatsapp(self, e=None) -> None:
@@ -655,16 +868,16 @@ class FacturacionController:
             # 2. Copiar la imagen al portapapeles y abrir WhatsApp (Web o App)
             result = share_invoice(image_path)
             if result.get("error"):
-                self._show_message(f"Error al abrir WhatsApp: {result['error']}", ft.colors.ERROR)
+                self._show_message(f"Error al abrir WhatsApp: {result['error']}", ft.Colors.ERROR)
                 return
 
             # 3. Mostrar un aviso cortito en la app para confirmar
-            self._show_message("Abriendo WhatsApp... Buscá el recuadro verde en la esquina.", ft.colors.PRIMARY)
+            self._show_message("Abriendo WhatsApp... Buscá el recuadro verde en la esquina.", ft.Colors.PRIMARY)
 
             # 4. Lanzar nuestra nueva herramienta flotante (encima del sistema operativo)
             from services.whatsapp_service import show_floating_paste_button
             show_floating_paste_button()
 
         except Exception as ex:
-            self._show_message(f"Error al procesar: {ex}", ft.colors.ERROR)
+            self._show_message(f"Error al procesar: {ex}", ft.Colors.ERROR)
             return

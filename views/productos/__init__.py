@@ -6,7 +6,7 @@ Pantalla principal de Productos con selector de modo:
 import flet as ft
 from theme import get_theme
 from views.productos.stock import StockView
-from views.productos.compras import ComprasView
+from views.productos.compras_nuevo import ComprasViewNuevo
 from views.productos.proveedores import ProveedoresView
 
 
@@ -20,7 +20,7 @@ def ProductosView(page: ft.Page, on_switch_tab=None):
         if m == "stock":
             return StockView(page, on_nueva_compra=lambda: _switch("compras"))
         if m == "compras":
-            return ComprasView(page, on_switch_tab=on_switch_tab)
+            return ComprasViewNuevo(page, on_switch_tab=on_switch_tab)
         if m == "proveedores":
             return ProveedoresView(page, on_switch_tab=on_switch_tab)
         return StockView(page)
@@ -49,15 +49,15 @@ def ProductosView(page: ft.Page, on_switch_tab=None):
         )
 
     btn_stock = ft.ElevatedButton(
-        "Stock", icon=ft.icons.INVENTORY_2_OUTLINED,
+        "Stock", icon=ft.Icons.INVENTORY_2_OUTLINED,
         style=_btn_style(True), on_click=lambda e: _switch("stock"),
     )
     btn_compras = ft.ElevatedButton(
-        "Compras", icon=ft.icons.SHOPPING_CART_OUTLINED,
+        "Compras", icon=ft.Icons.SHOPPING_CART_OUTLINED,
         style=_btn_style(False), on_click=lambda e: _switch("compras"),
     )
     btn_proveedores = ft.ElevatedButton(
-        "Proveedores", icon=ft.icons.PEOPLE_OUTLINED,
+        "Proveedores", icon=ft.Icons.PEOPLE_OUTLINED,
         style=_btn_style(False), on_click=lambda e: _switch("proveedores"),
     )
 

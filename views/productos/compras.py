@@ -12,12 +12,13 @@ from theme import get_theme
 
 from db.database import (
     get_compras, get_compra_by_numero, save_compra, update_compra, delete_compra,
-    get_stats_compras, get_productos,
+    get_stats_compras, get_productos, get_producto_by_detalle, get_producto_by_id,
     get_variantes_activas, get_variante_by_id,
     get_variante_by_producto_color_talla,
     get_colores, get_tallas,
     get_color_by_nombre, get_talla_by_nombre,
     save_color, save_talla, save_variante, save_producto,
+    get_colores_by_producto, get_talles_by_producto_color,
 )
 from services.autocomplete_service import search_proveedores, search_productos_proveedor, search_colores, search_talles
 from views.facturacion.components.autocomplete import AutocompleteField
@@ -75,7 +76,7 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
     items_controls: list[dict] = []
 
     def _show_message(text: str, color=t["accent"]):
-        page.open(ft.SnackBar(ft.Text(text, color=ft.colors.WHITE), bgcolor=color, duration=3200))
+        page.open(ft.SnackBar(ft.Text(text, color=ft.Colors.WHITE), bgcolor=color, duration=3200))
 
     def _recalcular():
         total = 0.0
@@ -132,19 +133,25 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
             tf_precio_nuevo.value = str(int(prod.get("precio_compra", 0) or 0))
             if prod.get("is_variant"):
                 ac_producto.value = prod.get("detalle", "")
-                ac_color.value = prod.get("color", "")
-                ac_talle.value = prod.get("talla", "")
                 item_data["_producto_id"] = prod.get("id")
                 item_data["_color_id"] = prod.get("color_id")
                 item_data["_talla_id"] = prod.get("talla_id")
                 item_data["_color_nombre"] = prod.get("color", "")
                 item_data["_talle_nombre"] = prod.get("talla", "")
                 _resolve_variant(item_data, tf_precio_nuevo, ultimo_precio_text, stock_badge)
-                if ac_color.field.page:
-                    try: ac_color.field.update()
+                all_colores = get_colores()
+                dd_color.options = [ft.dropdown.Option(key=str(c["id"]), text=c["nombre"]) for c in all_colores]
+                dd_color.disabled = False
+                dd_color.value = str(prod.get("color_id", "")) if prod.get("color_id") else None
+                all_tallas = get_tallas()
+                dd_talle.options = [ft.dropdown.Option(key=str(ta["id"]), text=ta["nombre"]) for ta in all_tallas]
+                dd_talle.disabled = False
+                dd_talle.value = str(prod.get("talla_id", "")) if prod.get("talla_id") else None
+                if dd_color.page:
+                    try: dd_color.update()
                     except Exception: pass
-                if ac_talle.field.page:
-                    try: ac_talle.field.update()
+                if dd_talle.page:
+                    try: dd_talle.update()
                     except Exception: pass
             elif prod.get("is_curva"):
                 item_data["_producto_id"] = prod.get("id")
@@ -159,14 +166,13 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
                 item_data["_color_nombre"] = None
                 item_data["_talle_nombre"] = None
                 item_data["_variante_id"] = None
-                ac_color.value = ""
-                ac_talle.value = ""
+                _populate_color_dropdown(prod.get("id"))
                 stock_badge.visible = False
-                if ac_color.field.page:
-                    try: ac_color.field.update()
+                if dd_color.page:
+                    try: dd_color.update()
                     except Exception: pass
-                if ac_talle.field.page:
-                    try: ac_talle.field.update()
+                if dd_talle.page:
+                    try: dd_talle.update()
                     except Exception: pass
                 if on_select:
                     on_select(prod, item_data)
@@ -194,67 +200,101 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
             hint_text="Producto...",
             expand=True, t=t,
             on_select=_on_producto_selected,
-            on_submit_next=lambda: ac_color.focus(),
+            on_submit_next=lambda: dd_color.focus(),
+            allow_free_text=False,
         )
         if init.get("detalle"):
             ac_producto.value = init["detalle"]
-        if init.get("_producto_id"):
-            item_data["_producto_id"] = init.get("_producto_id")
 
-        # ── Color Autocomplete ──
-        def _on_color_selected(c: dict) -> None:
-            item_data["_color_id"] = c.get("id")
-            item_data["_color_nombre"] = c.get("nombre", "")
-            _resolve_variant(item_data, tf_precio_nuevo, ultimo_precio_text, stock_badge)
-            if ac_talle.field.page:
-                try: ac_talle.field.update()
+        # ── Color Dropdown ──
+        dd_color = ft.Dropdown(
+            options=[], width=100, text_size=13,
+            hint_text="Color", disabled=True,
+            border_color=t["border"], focused_border_color=t["accent"],
+            bgcolor=t["bg_input"], color=t["text_primary"],
+            hint_style=ft.TextStyle(color=t["text_hint"]),
+            content_padding=ft.padding.symmetric(6, 4),
+            on_change=lambda e: _on_color_change(e.control.value),
+        )
+
+        def _on_color_change(color_id_str):
+            if not color_id_str:
+                item_data["_color_id"] = None
+                item_data["_color_nombre"] = None
+                dd_talle.options = []
+                dd_talle.value = None
+                dd_talle.disabled = True
+                if dd_talle.page:
+                    try: dd_talle.update()
+                    except Exception: pass
+                return
+            cid = int(color_id_str)
+            prod_id = item_data.get("_producto_id")
+            item_data["_color_id"] = cid
+            option = next((c for c in dd_color.options if c.key == color_id_str), None)
+            item_data["_color_nombre"] = option.text if option else ""
+            talles = get_talles_by_producto_color(prod_id, cid) if prod_id else []
+            dd_talle.options = [ft.dropdown.Option(key=str(t["id"]), text=t["nombre"]) for t in talles]
+            dd_talle.disabled = False
+            dd_talle.value = None
+            item_data["_talla_id"] = None
+            item_data["_talle_nombre"] = None
+            if dd_talle.page:
+                try: dd_talle.update()
                 except Exception: pass
-            if on_change:
-                on_change()
-
-        ac_color = AutocompleteField(
-            page=page,
-            search_fn=lambda q: search_colores(q, producto_id=item_data.get("_producto_id")),
-            label_fn=lambda c: c.get("nombre", ""),
-            hint_text="Color", t=t,
-            width=120,
-            on_select=_on_color_selected,
-            on_submit_next=lambda: ac_talle.focus(),
-        )
-        if init.get("color"):
-            ac_color.value = init["color"]
-            item_data["_color_nombre"] = init["color"]
-        if init.get("color_id"):
-            item_data["_color_id"] = init["color_id"]
-
-        # ── Talle Autocomplete ──
-        def _on_talle_selected(t: dict) -> None:
-            item_data["_talla_id"] = t.get("id")
-            item_data["_talle_nombre"] = t.get("nombre", "")
             _resolve_variant(item_data, tf_precio_nuevo, ultimo_precio_text, stock_badge)
             if on_change:
                 on_change()
 
-        ac_talle = AutocompleteField(
-            page=page,
-            search_fn=lambda q: search_talles(q, producto_id=item_data.get("_producto_id"), color_id=item_data.get("_color_id")),
-            label_fn=lambda t: t.get("nombre", ""),
-            hint_text="Talle", t=t,
-            width=100,
-            on_select=_on_talle_selected,
-            on_submit_next=lambda: tf_stock.focus(),
+        def _populate_color_dropdown(producto_id):
+            colores = get_colores_by_producto(producto_id) if producto_id else []
+            dd_color.options = [ft.dropdown.Option(key=str(c["id"]), text=c["nombre"]) for c in colores]
+            dd_color.disabled = False
+            dd_color.value = None
+            dd_talle.options = []
+            dd_talle.disabled = True
+            dd_talle.value = None
+
+        # ── Talle Dropdown ──
+        dd_talle = ft.Dropdown(
+            options=[], width=85, text_size=13,
+            hint_text="Talle", disabled=True,
+            border_color=t["border"], focused_border_color=t["accent"],
+            bgcolor=t["bg_input"], color=t["text_primary"],
+            hint_style=ft.TextStyle(color=t["text_hint"]),
+            content_padding=ft.padding.symmetric(6, 4),
+            on_change=lambda e: _on_talle_change(e.control.value),
         )
-        if init.get("talla"):
-            ac_talle.value = init["talla"]
-            item_data["_talle_nombre"] = init["talla"]
+
+        def _on_talle_change(talle_id_str):
+            if not talle_id_str:
+                item_data["_talla_id"] = None
+                item_data["_talle_nombre"] = None
+                return
+            tid = int(talle_id_str)
+            item_data["_talla_id"] = tid
+            option = next((td for td in dd_talle.options if td.key == talle_id_str), None)
+            item_data["_talle_nombre"] = option.text if option else ""
+            _resolve_variant(item_data, tf_precio_nuevo, ultimo_precio_text, stock_badge)
+            if on_change:
+                on_change()
+
+        if init.get("color_id"):
+            all_colores = get_colores()
+            dd_color.options = [ft.dropdown.Option(key=str(c["id"]), text=c["nombre"]) for c in all_colores]
+            dd_color.disabled = False
+            dd_color.value = str(init["color_id"])
         if init.get("talla_id"):
-            item_data["_talla_id"] = init["talla_id"]
+            all_tallas = get_tallas()
+            dd_talle.options = [ft.dropdown.Option(key=str(ta["id"]), text=ta["nombre"]) for ta in all_tallas]
+            dd_talle.disabled = False
+            dd_talle.value = str(init["talla_id"])
 
         # ── Stock a Comprar ──
         raw_cant = init.get("cantidad", 1)
         stock_val = str(raw_cant).rstrip("0").rstrip(".") if isinstance(raw_cant, float) else str(raw_cant)
         tf_stock = ft.TextField(
-            value=stock_val, width=55, height=34, text_size=13,
+            value=stock_val, width=50, height=34, text_size=13,
             hint_text="Stock",
             content_padding=ft.padding.symmetric(6, 6), border_radius=6,
             keyboard_type=ft.KeyboardType.NUMBER, text_align=ft.TextAlign.CENTER,
@@ -273,7 +313,7 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
             ultimo_precio_text.value = f"Últ: {_fmt(float(raw_precio))}"
             ultimo_precio_text.visible = True
         tf_precio_nuevo = ft.TextField(
-            value=precio_val, width=110, height=34, text_size=13,
+            value=precio_val, width=95, height=34, text_size=13,
             hint_text="Precio",
             content_padding=ft.padding.symmetric(8, 6), border_radius=6,
             keyboard_type=ft.KeyboardType.NUMBER, text_align=ft.TextAlign.RIGHT,
@@ -289,16 +329,16 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
 
         # ── Total ──
         tf_total = ft.TextField(
-            value=_fmt(init.get("total", 0)), width=80, height=34, text_size=13,
+            value=_fmt(init.get("total", 0)), width=70, height=34, text_size=13,
             content_padding=ft.padding.symmetric(8, 6), border_radius=6,
-            read_only=True, text_align=ft.TextAlign.RIGHT, border_color=ft.colors.TRANSPARENT,
-            bgcolor=ft.colors.SURFACE_VARIANT,
+            read_only=True, text_align=ft.TextAlign.RIGHT, border_color=ft.Colors.TRANSPARENT,
+            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
         )
 
         item_data: dict = {
             "ac_producto": ac_producto,
-            "ac_color": ac_color,
-            "ac_talle": ac_talle,
+            "ac_color": dd_color,
+            "ac_talle": dd_talle,
             "stock": tf_stock,
             "precio": tf_precio_nuevo,
             "total_tf": tf_total,
@@ -312,7 +352,7 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
         }
 
         remove_btn = ft.IconButton(
-            ft.icons.REMOVE_CIRCLE_OUTLINE, icon_color=ft.colors.ERROR,
+            ft.Icons.REMOVE_CIRCLE_OUTLINE, icon_color=ft.Colors.ERROR,
             icon_size=16, tooltip="Quitar fila",
             on_click=lambda e: on_remove and on_remove(item_data),
             style=ft.ButtonStyle(padding=ft.padding.all(4)),
@@ -321,9 +361,9 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
         row = ft.Container(
             content=ft.Column([
                 ft.Row([
-                    ft.Container(content=ac_producto.control, expand=True),
-                    ft.Container(content=ac_color.control, width=120),
-                    ft.Container(content=ac_talle.control, width=100),
+                    ft.Container(content=ac_producto.control, width=220),
+                    dd_color,
+                    dd_talle,
                     tf_stock,
                     precio_col,
                     tf_total,
@@ -336,7 +376,7 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
         item_data["row"] = row
 
         # If initial data had a variant, resolve it
-        if item_data["_variante_id"] and item_data["_producto_id"] and item_data.get("_color_id") and item_data.get("_talla_id"):
+        if item_data.get("_producto_id") and item_data.get("_color_id") and item_data.get("_talla_id"):
             _resolve_variant(item_data, tf_precio_nuevo, ultimo_precio_text, stock_badge)
         elif init.get("stock_actual") and not init.get("_producto_id"):
             stock_badge.content.value = f"Stock: {int(init['stock_actual'])}"
@@ -377,8 +417,6 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
             if i < len(slots):
                 slot = slots[i]
                 slot["ac_producto"].value = prod.get("detalle", "")
-                slot["ac_color"].value = v.get("color", "")
-                slot["ac_talle"].value = v.get("talla", "")
                 slot["_variante_id"] = v["id"]
                 slot["_producto_id"] = prod.get("id")
                 slot["_color_id"] = v.get("color_id")
@@ -387,14 +425,22 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
                 slot["_talle_nombre"] = v.get("talla", "")
                 slot["precio"].value = str(int(v.get("precio_compra", 0) or 0))
                 slot["stock"].value = "1"
+                colores = get_colores_by_producto(prod["id"]) if prod.get("id") else []
+                slot["ac_color"].options = [ft.dropdown.Option(key=str(c["id"]), text=c["nombre"]) for c in colores]
+                slot["ac_color"].disabled = False
+                slot["ac_color"].value = str(v.get("color_id", "")) if v.get("color_id") else None
+                talles = get_talles_by_producto_color(prod["id"], v.get("color_id")) if prod.get("id") and v.get("color_id") else []
+                slot["ac_talle"].options = [ft.dropdown.Option(key=str(ta["id"]), text=ta["nombre"]) for ta in talles]
+                slot["ac_talle"].disabled = False
+                slot["ac_talle"].value = str(v.get("talla_id", "")) if v.get("talla_id") else None
                 if slot["ac_producto"].field.page:
                     try: slot["ac_producto"].field.update()
                     except Exception: pass
-                if slot["ac_color"].field.page:
-                    try: slot["ac_color"].field.update()
+                if slot["ac_color"].page:
+                    try: slot["ac_color"].update()
                     except Exception: pass
-                if slot["ac_talle"].field.page:
-                    try: slot["ac_talle"].field.update()
+                if slot["ac_talle"].page:
+                    try: slot["ac_talle"].update()
                     except Exception: pass
                 if slot["precio"].page:
                     try: slot["precio"].update()
@@ -403,27 +449,31 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
                     try: slot["stock"].update()
                     except Exception: pass
             else:
-                row = _build_compra_row(
-                    initial={
-                        "detalle": prod.get("detalle", ""),
-                        "color": v.get("color", ""),
-                        "talla": v.get("talla", ""),
-                        "color_id": v.get("color_id"),
-                        "talla_id": v.get("talla_id"),
-                        "cantidad": 1,
-                        "precio_unitario": v.get("precio_compra", 0) or 0,
-                        "variante_id": v["id"],
-                        "_producto_id": prod.get("id"),
-                        "stock_actual": v.get("stock_actual", 0),
-                    },
-                    on_change=lambda: _recalcular(),
-                    on_remove=_on_item_removed,
-                    on_row_complete=lambda item: _on_row_complete(item),
-                    on_select=_on_row_producto_selected,
-                )
-                items_controls.append(row)
-                items_col.controls.append(row["row"])
-        items_col.update()
+                try:
+                    row = _build_compra_row(
+                        initial={
+                            "detalle": prod.get("detalle", ""),
+                            "color": v.get("color", ""),
+                            "talla": v.get("talla", ""),
+                            "color_id": v.get("color_id"),
+                            "talla_id": v.get("talla_id"),
+                            "cantidad": 1,
+                            "precio_unitario": v.get("precio_compra", 0) or 0,
+                            "variante_id": v["id"],
+                            "_producto_id": prod.get("id"),
+                            "stock_actual": v.get("stock_actual", 0),
+                        },
+                        on_change=lambda: _recalcular(),
+                        on_remove=_on_item_removed,
+                        on_row_complete=lambda item: _on_row_complete(item),
+                        on_select=_on_row_producto_selected,
+                    )
+                    items_controls.append(row)
+                    items_col.controls.append(row["row"])
+                except Exception as ex:
+                    _show_message(f"Error al crear fila: {ex}", ft.Colors.ERROR)
+                    log.error(f"Error _build_compra_row: {ex}", exc_info=True)
+        page.update()
         _recalcular()
 
     def _build_new_row(initial=None):
@@ -440,6 +490,8 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
         row = _build_new_row()
         items_controls.append(row)
         items_col.controls.append(row["row"])
+        if items_col.page:
+            items_col.update()
 
     def _on_row_complete(current_item=None):
         if current_item:
@@ -477,27 +529,45 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
         numero_text.value = compra["numero"]
         fecha_text.value = compra.get("fecha", "")
         ac_proveedor.value = compra.get("proveedor_nombre", "")
+        ac_proveedor.field.update()
         tf_notas.value = compra.get("notas", "")
+        tf_notas.update()
         items_controls.clear()
         items_col.controls.clear()
         for i, it in enumerate(compra.get("items", [])):
             v_id = it.get("variante_id")
             stock_act = 0
+            v_data = None
             if v_id:
                 v_data = get_variante_by_id(v_id)
                 if v_data:
                     stock_act = v_data.get("stock_actual", 0) or 0
+
+            # Resolver producto_id, color_id, talla_id desde v_data o desde DB
+            pid = v_data.get("producto_id") if v_data else it.get("producto_id")
+            cid = v_data.get("color_id") if v_data else it.get("color_id")
+            tid = v_data.get("talla_id") if v_data else it.get("talla_id")
+            color_nombre = v_data.get("color", "") if v_data else ""
+            talle_nombre = v_data.get("talla", "") if v_data else ""
+
+            # Usar nombre del producto en vez del detalle completo para evitar duplicación
+            detalle_autocomplete = it.get("detalle", "")
+            if pid:
+                prod = get_producto_by_id(pid)
+                if prod:
+                    detalle_autocomplete = prod.get("detalle", "") or detalle_autocomplete
+
             row = _build_new_row(initial={
-                "detalle": it.get("detalle", ""),
-                "color": v_data.get("color", "") if v_data else "",
-                "talla": v_data.get("talla", "") if v_data else "",
-                "color_id": v_data.get("color_id") if v_data else None,
-                "talla_id": v_data.get("talla_id") if v_data else None,
+                "detalle": detalle_autocomplete,
+                "color": color_nombre,
+                "talla": talle_nombre,
+                "color_id": cid,
+                "talla_id": tid,
                 "cantidad": float(it.get("cantidad", 1)),
                 "precio_unitario": float(it.get("precio_unitario", 0)),
                 "total": it.get("total", 0),
                 "variante_id": v_id,
-                "_producto_id": v_data.get("producto_id") if v_data else None,
+                "_producto_id": pid,
                 "stock_actual": stock_act,
             })
             items_controls.append(row)
@@ -568,18 +638,20 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
         def _do_save(items_override=None):
             final_items = items_override or items_data
             try:
+                from services.auth_service import AuthService
                 if state["numero_actual"]:
                     numero = update_compra(state["numero_actual"], data, final_items)
                     msg = f"Compra {numero} actualizada correctamente"
                 else:
                     numero = save_compra(data, final_items)
                     msg = f"Compra {numero} guardada correctamente"
-                _show_message(msg, ft.colors.GREEN_700)
+                _show_message(msg, ft.Colors.GREEN_700)
+                AuthService().track("compra", numero, f"Compra {numero} —Proveedor: {data.get('proveedor_nombre', '')}")
                 _limpiar_form()
                 _refresh_history()
             except Exception as ex:
                 log.error(f"Error guardando compra: {ex}", exc_info=True)
-                _show_message(f"Error: {ex}", ft.colors.ERROR)
+                _show_message(f"Error: {ex}", ft.Colors.ERROR)
 
         if unresolved:
             rows = []
@@ -592,7 +664,7 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
                 talla = get_talla_by_nombre(talla_name) if talla_name else None
                 issues = []
                 if not prod:
-                    issues.append("nuevo producto")
+                    issues.append("crear desde Productos")
                 elif not color:
                     issues.append("nuevo color")
                 elif not talla:
@@ -612,15 +684,16 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
 
             def _resolve_and_save(ev, dlg):
                 page.close(dlg)
+                errores = []
                 for it in unresolved:
                     prod_name = it.get("producto", "")
                     color_name = it.get("color", "")
                     talla_name = it.get("talla", "")
                     prod = get_producto_by_detalle(prod_name)
                     if not prod:
-                        prod_id = save_producto({"detalle": prod_name})
-                    else:
-                        prod_id = prod["id"]
+                        errores.append(f"'{prod_name}' no existe. Créalo desde Productos > Nuevo producto")
+                        continue
+                    prod_id = prod["id"]
                     color = get_color_by_nombre(color_name) if color_name else None
                     if not color and color_name:
                         color_id = save_color(color_name)
@@ -638,10 +711,14 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
                             "precio_compra": it.get("precio_unitario", 0),
                         })
                         it["variante_id"] = v_id
+                if errores:
+                    _show_message(" | ".join(errores), ft.Colors.ERROR)
+                    return
                 _do_save()
 
             dlg = ft.AlertDialog(
                 modal=True,
+                bgcolor=t["bg_card"],
                 title=ft.Text("Filas sin variante", size=15, weight=ft.FontWeight.W_500),
                 content=ft.Container(
                     content=ft.Column([
@@ -672,22 +749,15 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
         return ft.Container(
             content=ft.Row(
                 [
-                    ft.Text(compra.get("fecha", ""), size=11, color=t["text_secondary"], width=80),
-                    ft.Text(compra.get("proveedor_nombre", ""), size=12, width=100,
+                    ft.Text(compra.get("fecha", ""), size=11, color=t["text_secondary"], width=70),
+                    ft.Text(compra.get("proveedor_nombre", ""), size=12, width=90,
                             max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
                     ft.Text(resumen, size=11, color=t["text_primary"], expand=True,
                             max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
-                    ft.Text(_fmt(compra.get("total", 0)), size=12, weight=ft.FontWeight.W_600, width=80, text_align=ft.TextAlign.RIGHT),
-                    ft.Row(
-                        [
-                            ft.IconButton(ft.icons.EDIT_OUTLINED, icon_size=14, tooltip="Editar",
-                                          on_click=lambda e, c=compra: _editar_compra(c)),
-                            ft.IconButton(ft.icons.DELETE_OUTLINED, icon_size=14, tooltip="Eliminar",
-                                          icon_color=ft.colors.ERROR,
-                                          on_click=lambda e, c=compra: _confirmar_eliminar(c)),
-                        ],
-                        spacing=0, width=50,
-                    ),
+                    ft.Text(_fmt(compra.get("total", 0)), size=12, weight=ft.FontWeight.W_600, width=70, text_align=ft.TextAlign.RIGHT),
+                    ft.IconButton(ft.Icons.DELETE_OUTLINED, icon_size=14, tooltip="Eliminar",
+                                  icon_color=ft.Colors.ERROR,
+                                  on_click=lambda e, c=compra: _confirmar_eliminar(c)),
                 ],
                 spacing=4,
             ),
@@ -706,7 +776,7 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
                 ft.Container(
                     content=ft.Column(
                         [
-                            ft.Icon(ft.icons.SHOPPING_CART_OUTLINED, size=36, color=t["text_hint"]),
+                            ft.Icon(ft.Icons.SHOPPING_CART_OUTLINED, size=36, color=t["text_hint"]),
                             ft.Text("No hay compras registradas.", size=14, weight=ft.FontWeight.W_500),
                         ],
                         spacing=6, horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -719,10 +789,10 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
                 ft.Container(
                     ft.Row(
                         [
-                            ft.Text("Fecha", size=10, weight=ft.FontWeight.W_500, color=t["text_secondary"], width=80),
-                            ft.Text("Proveedor", size=10, weight=ft.FontWeight.W_500, color=t["text_secondary"], width=100),
+                            ft.Text("Fecha", size=10, weight=ft.FontWeight.W_500, color=t["text_secondary"], width=70),
+                            ft.Text("Proveedor", size=10, weight=ft.FontWeight.W_500, color=t["text_secondary"], width=90),
                             ft.Text("Resumen", size=10, weight=ft.FontWeight.W_500, color=t["text_secondary"], expand=True),
-                            ft.Text("Total", size=10, weight=ft.FontWeight.W_500, color=t["text_secondary"], width=80, text_align=ft.TextAlign.RIGHT),
+                            ft.Text("Total", size=10, weight=ft.FontWeight.W_500, color=t["text_secondary"], width=70, text_align=ft.TextAlign.RIGHT),
                             ft.Container(width=50),
                         ],
                         spacing=4,
@@ -748,19 +818,20 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
                 delete_compra(compra["numero"])
                 if state["numero_actual"] == compra["numero"]:
                     _limpiar_form()
-                _show_message(f"Compra {compra['numero']} eliminada.", ft.colors.ERROR)
+                _show_message(f"Compra {compra['numero']} eliminada.", ft.Colors.ERROR)
                 page.close(d)
                 _refresh_history()
             except Exception as ex:
-                _show_message(f"Error: {ex}", ft.colors.ERROR)
+                _show_message(f"Error: {ex}", ft.Colors.ERROR)
 
         dlg = ft.AlertDialog(
             modal=True,
+            bgcolor=t["bg_card"],
             title=ft.Text("Eliminar compra"),
             content=ft.Text(f"¿Seguro que querés eliminar la compra {compra['numero']}?\nSe revertirá el stock."),
             actions=[
                 ft.TextButton("Cancelar", on_click=lambda ev: page.close(dlg)),
-                ft.ElevatedButton("Eliminar", bgcolor=ft.colors.ERROR, color=t["accent_text"],
+                ft.ElevatedButton("Eliminar", bgcolor=ft.Colors.ERROR, color=t["accent_text"],
                                   on_click=lambda ev: _do_delete(ev, dlg)),
             ],
             actions_alignment=ft.MainAxisAlignment.END,
@@ -809,7 +880,21 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
                     vertical_alignment=ft.CrossAxisAlignment.START,
                 ),
                 ft.Container(
-                    content=items_col,
+                    content=ft.Column([
+                        items_col,
+                        ft.Container(
+                            content=ft.IconButton(
+                                icon=ft.Icons.ADD,
+                                icon_size=14,
+                                icon_color=t["text_hint"],
+                                tooltip="Agregar fila",
+                                on_click=lambda e: _add_empty_row(),
+                                style=ft.ButtonStyle(padding=ft.padding.all(4)),
+                            ),
+                            alignment=ft.alignment.center,
+                            padding=ft.padding.symmetric(0, 4),
+                        ),
+                    ], spacing=0, tight=True),
                     expand=True,
                     border=ft.border.all(0.5, t["border_light"]),
                     border_radius=8,
@@ -822,7 +907,7 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
                         ft.Row(
                             [
                                 ft.OutlinedButton("Limpiar", on_click=lambda e: _limpiar_form()),
-                                ft.ElevatedButton("Guardar compra", icon=ft.icons.SAVE,
+                                ft.ElevatedButton("Guardar compra", icon=ft.Icons.SAVE,
                                                   bgcolor=t["accent"], color=t["accent_text"],
                                                   on_click=_guardar),
                             ],
@@ -853,7 +938,7 @@ def ComprasView(page: ft.Page, on_switch_tab=None):
             spacing=6, expand=True,
         ),
         padding=ft.padding.only(left=12),
-        width=280,
+        width=400,
     )
 
     _refresh_history()

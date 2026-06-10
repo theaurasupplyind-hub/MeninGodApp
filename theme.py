@@ -24,6 +24,7 @@ def get_theme(page: ft.Page) -> dict:
         dark_theme = {
             "bg_page":          "#0A0F1C",
             "bg_card":          "#111827",
+            "bg_titlebar":      "#111827",
             "bg_row_even":      "#111827",
             "bg_row_odd":       "#0D1520",
             "bg_header":        "#0A0F1C",
@@ -40,6 +41,7 @@ def get_theme(page: ft.Page) -> dict:
             "accent_text":      "#0D1B2A",
             "badge_pendiente":  ("#3A2800", "#C9A84C"),
             "badge_entregado":  ("#0D2040", "#64B5F6"),
+            "badge_enviado":    ("#0D2040", "#64B5F6"),
             "badge_pagado":     ("#0A2A1A", "#4CAF50"),
             "badge_cancelado":  ("#252525", "#777777"),
             "badge_en_proceso": ("#1A2A40", "#90CAF9"),
@@ -55,6 +57,7 @@ def get_theme(page: ft.Page) -> dict:
         light_theme = {
             "bg_page":          "#FDFAF4",
             "bg_card":          "#FFFFFF",
+            "bg_titlebar":      "#E8E0D0",
             "bg_row_even":      "#FFFFFF",
             "bg_row_odd":       "#FAF7F0",
             "bg_header":        "#F5F0E8",
@@ -71,6 +74,7 @@ def get_theme(page: ft.Page) -> dict:
             "accent_text":      "#FFFFFF",
             "badge_pendiente":  ("#FFF3D0", "#8A6200"),
             "badge_entregado":  ("#E3F0FF", "#1565C0"),
+            "badge_enviado":    ("#E3F0FF", "#1565C0"),
             "badge_pagado":     ("#E8F5E9", "#2E7D32"),
             "badge_cancelado":  ("#F3F4F6", "#374151"),
             "badge_en_proceso": ("#E8F0FE", "#1A56DB"),
@@ -96,7 +100,7 @@ def accent_button(text: str, on_click=None, expand=False) -> ft.ElevatedButton:
         expand=expand,
         style=ft.ButtonStyle(
             shape=ft.RoundedRectangleBorder(radius=8),
-            overlay_color=ft.colors.with_opacity(0.15, "#FFFFFF"),
+            overlay_color=ft.Colors.with_opacity(0.15, "#FFFFFF"),
         ),
     )
 

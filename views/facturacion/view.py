@@ -64,7 +64,7 @@ def FacturacionView(
     total_text = ft.Text(
         "$ 0", size=32, weight=ft.FontWeight.W_700, color=t["accent"]
     )
-    items_col = ft.ListView(spacing=4, expand=True, auto_scroll=False)
+    items_col = ft.ListView(spacing=0, expand=True, auto_scroll=False)
     history_col = ft.ListView(spacing=0, expand=True, auto_scroll=False)
 
     # ── Campos de cliente ──────────────────────────────────────────────────────
@@ -129,7 +129,7 @@ def FacturacionView(
         expand=True,
         border_color=t["border"],
         focused_border_color=t["accent"],
-        prefix_icon=ft.icons.SEARCH,
+        prefix_icon=ft.Icons.SEARCH,
         bgcolor=t["bg_input"],
         color=t["text_primary"],
         hint_style=ft.TextStyle(color=t["text_hint"]),
@@ -251,7 +251,7 @@ def FacturacionView(
     # ── Botones de acción ──────────────────────────────────────────────────────
     btn_guardar = ft.ElevatedButton(
         "Guardar  [F1]",
-        icon=ft.icons.SAVE_OUTLINED,
+        icon=ft.Icons.SAVE_OUTLINED,
         on_click=ctrl.save,
         bgcolor=t["accent"],
         color=t["accent_text"],
@@ -264,7 +264,7 @@ def FacturacionView(
 
     btn_nueva = ft.ElevatedButton(
         "Nueva  [F2]",
-        icon=ft.icons.ADD,
+        icon=ft.Icons.ADD,
         on_click=ctrl.nueva,
         bgcolor=t["bg_card"],
         color=t["accent"],
@@ -276,27 +276,29 @@ def FacturacionView(
         width=210,
     )
 
-    btn_pdf = ft.OutlinedButton(
-        "Ver PDF",
-        icon=ft.icons.PICTURE_AS_PDF_OUTLINED,
-        style=ft.ButtonStyle(
-            shape=ft.RoundedRectangleBorder(radius=8),
-            padding=ft.padding.symmetric(10, 14),
-            color=t["text_secondary"],
-        ),
-        width=210,
-    )
-
     btn_whatsapp = ft.OutlinedButton(
         "Compartir WhatsApp",
-        icon=ft.icons.SHARE_OUTLINED,
+        icon=ft.Icons.SHARE_OUTLINED,
         width=210,
         on_click=ctrl.share_whatsapp,
         style=ft.ButtonStyle(
             shape=ft.RoundedRectangleBorder(radius=8),
             padding=ft.padding.symmetric(10, 14),
-            color=ft.colors.GREEN_700,
-            side=ft.BorderSide(1, ft.colors.GREEN_200),
+            color=ft.Colors.GREEN_700,
+            side=ft.BorderSide(1, ft.Colors.GREEN_200),
+        ),
+    )
+
+    btn_eliminar = ft.OutlinedButton(
+        "Eliminar factura",
+        icon=ft.Icons.DELETE_OUTLINE,
+        width=210,
+        on_click=ctrl.delete,
+        style=ft.ButtonStyle(
+            shape=ft.RoundedRectangleBorder(radius=8),
+            padding=ft.padding.symmetric(10, 14),
+            color=ft.Colors.RED_700,
+            side=ft.BorderSide(1, ft.Colors.RED_300),
         ),
     )
 
@@ -343,8 +345,10 @@ def FacturacionView(
                 btn_nueva,
 
                 ft.Divider(height=1, color=t["border_light"]),
-                btn_pdf,
                 btn_whatsapp,
+
+                ft.Divider(height=1, color=t["border_light"]),
+                btn_eliminar,
             ],
             spacing=10,
         ),
@@ -360,10 +364,9 @@ def FacturacionView(
     items_header = ft.Container(
         content=ft.Row(
             [
-                ft.Container(width=20),
                 ft.Container(
                     ft.Text("CANT.", size=10, color=t["text_secondary"], weight=ft.FontWeight.W_600),
-                    width=60,
+                    width=52,
                 ),
                 ft.Container(
                     ft.Text("DETALLE", size=10, color=t["text_secondary"], weight=ft.FontWeight.W_600),
@@ -371,20 +374,18 @@ def FacturacionView(
                 ),
                 ft.Container(
                     ft.Text("P. UNIT.", size=10, color=t["text_secondary"], weight=ft.FontWeight.W_600),
-                    width=110,
+                    width=105,
                 ),
                 ft.Container(
                     ft.Text("TOTAL", size=10, color=t["text_secondary"], weight=ft.FontWeight.W_600),
-                    width=100,
+                    width=95,
                 ),
-                ft.Container(width=36),
+                ft.Container(width=32),
             ],
-            spacing=5,
+            spacing=0,
         ),
         padding=ft.padding.symmetric(6, 4),
         bgcolor=t["bg_header"],
-        border_radius=ft.border_radius.only(top_left=6, top_right=6),
-        border=ft.border.only(bottom=ft.border.BorderSide(0.5, t["border_light"])),
     )
 
     # ── Panel central ──────────────────────────────────────────────────────────
@@ -425,7 +426,7 @@ def FacturacionView(
                                             ft.Text("·", size=12, color=t["border"]),
                                             fecha_text,
                                         ],
-                                        spacing=5,
+            spacing=0,
                                     ),
                                 ],
                                 horizontal_alignment=ft.CrossAxisAlignment.END,
@@ -508,8 +509,8 @@ def FacturacionView(
                     ),
                     expand=True,
                     bgcolor=t["bg_card"],
-                    border=ft.border.all(0.5, t["border_light"]),
                     border_radius=8,
+                    border=ft.border.all(0.5, t["border"]),
                     clip_behavior=ft.ClipBehavior.HARD_EDGE,
                 ),
 
@@ -518,7 +519,7 @@ def FacturacionView(
                     [
                         ft.OutlinedButton(
                             "Anterior factura",
-                            icon=ft.icons.ARROW_BACK,
+                            icon=ft.Icons.ARROW_BACK,
                             on_click=lambda e: ctrl.load_relative_factura(1),
                             style=ft.ButtonStyle(
                                 shape=ft.RoundedRectangleBorder(radius=7),
@@ -528,7 +529,7 @@ def FacturacionView(
                         ),
                         ft.OutlinedButton(
                             "Siguiente factura",
-                            icon=ft.icons.ARROW_FORWARD,
+                            icon=ft.Icons.ARROW_FORWARD,
                             on_click=lambda e: ctrl.load_relative_factura(-1),
                             style=ft.ButtonStyle(
                                 shape=ft.RoundedRectangleBorder(radius=7),
@@ -665,6 +666,7 @@ def FacturacionView(
 
         dlg = ft.AlertDialog(
             modal=True,
+            bgcolor=t["bg_card"],
             title=ft.Text(f"Resolver: {curva.get('detalle_curva', '')}",
                           size=15, weight=ft.FontWeight.W_500),
             content=ft.Container(
@@ -704,7 +706,7 @@ def FacturacionView(
                             expand=True,
                         ),
                         ft.IconButton(
-                            ft.icons.REFRESH,
+                            ft.Icons.REFRESH,
                             icon_size=16,
                             icon_color=t["text_secondary"],
                             tooltip="Actualizar",

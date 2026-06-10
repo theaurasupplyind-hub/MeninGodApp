@@ -1,4 +1,5 @@
 import logging
+import traceback
 log = logging.getLogger("mvp10")
 
 import flet as ft
@@ -33,7 +34,7 @@ def build_form(page, t, producto=None, on_saved=None, on_cancel=None):
 
     def _show_message(text: str, color=None):
         sb = ft.SnackBar(
-            ft.Text(text, color=ft.colors.WHITE),
+            ft.Text(text, color=ft.Colors.WHITE),
             bgcolor=color or t["accent"],
             duration=3200,
         )
@@ -61,7 +62,6 @@ def build_form(page, t, producto=None, on_saved=None, on_cancel=None):
             hint_text=hint,
             options=options or [],
             border_radius=7,
-            height=38,
             text_size=13,
             content_padding=ft.padding.symmetric(4, 10),
             width=width,
@@ -112,7 +112,7 @@ def build_form(page, t, producto=None, on_saved=None, on_cancel=None):
             ft.dropdown.Option("propio", "Propio (fabrica uds.)"),
         ],
         value="proveedor",
-        border_radius=7, height=38, text_size=13,
+        border_radius=7, text_size=13,
         content_padding=ft.padding.symmetric(4, 10),
         border_color=t["border"],
         focused_border_color=t["accent"],
@@ -167,8 +167,8 @@ def build_form(page, t, producto=None, on_saved=None, on_cancel=None):
         controls = [
             ft.Text(str(idx), size=12, color=t["text_secondary"], width=20),
             row_dd_color, row_dd_talla, row_tf_precio,
-            ft.IconButton(ft.icons.CLOSE, icon_size=14,
-                          icon_color=ft.colors.ERROR,
+            ft.IconButton(ft.Icons.CLOSE, icon_size=14,
+                          icon_color=ft.Colors.ERROR,
                           on_click=_remove,
                           style=ft.ButtonStyle(padding=ft.padding.all(2))),
         ]
@@ -295,6 +295,7 @@ def build_form(page, t, producto=None, on_saved=None, on_cancel=None):
 
         dlg_combinar = ft.AlertDialog(
             modal=True,
+            bgcolor=t["bg_card"],
             title=ft.Text("Generar combinaciones", size=15, weight=ft.FontWeight.W_500),
             content=ft.Container(
                 content=ft.Column([
@@ -328,67 +329,85 @@ def build_form(page, t, producto=None, on_saved=None, on_cancel=None):
         page.open(dlg_combinar)
 
     def _handle_save():
-        detalle = (tf_detalle.value or "").strip()
-        if not detalle:
-            _show_message("El nombre del articulo es obligatorio.", t["accent"])
-            return
-
-        if not variantes_rows:
-            _show_message("Agrega al menos una variante.", t["accent"])
-            return
-
-        origen = dd_origen.value or "proveedor"
-        es_propio = origen == "propio"
-
-        for v in variantes_rows:
-            precio_venta = _parse_input_number(v["precio"].value or "0")
-            if precio_venta <= 0:
-                _show_message("El precio venta debe ser mayor a 0 en todas las variantes.", t["accent"])
+        try:
+            detalle = (tf_detalle.value or "").strip()
+            if not detalle:
+                _show_message("El nombre del articulo es obligatorio.", t["accent"])
                 return
 
-        if editing_id["value"]:
-            update_producto(editing_id["value"], {
-                "detalle": detalle,
-                "precio_unitario": 0,
-                "stock_actual": 0,
-                "stock_minimo": 0,
-                "tipo_origen": origen,
-            })
-            prod_id = editing_id["value"]
-            existing = get_variantes_by_producto(prod_id)
-            for v in existing:
-                desactivar_variante(v["id"])
-            msg = f"Articulo '{detalle}' actualizado."
-        else:
-            prod_id = save_producto({
-                "detalle": detalle,
-                "precio_unitario": 0,
-                "stock_actual": 0,
-                "stock_minimo": 0,
-                "tipo_origen": origen,
-            })
-            msg = f"Articulo '{detalle}' creado."
+            if not variantes_rows:
+                _show_message("Agrega al menos una variante.", t["accent"])
+                return
 
-        fabri_val = _parse_input_number(tf_fabri_default.value or "0") if es_propio else 0
-        stock_val = _parse_input_number(tf_stock_default.value or "0") if es_propio else 0
+            # Filtrar filas vacías (sin color ni talle)
+            variantes_filtradas = [v for v in variantes_rows
+                                   if (v["color"].value or "") != ""
+                                   or (v["talla"].value or "") != ""]
+            if not variantes_filtradas:
+                _show_message("Agrega al menos una variante.", t["accent"])
+                return
 
-        for v in variantes_rows:
-            color_id = int(v["color"].value) if v["color"].value and v["color"].value != "" else None
-            talla_id = int(v["talla"].value) if v["talla"].value and v["talla"].value != "" else None
-            precio = _parse_input_number(v["precio"].value or "0")
+            origen = dd_origen.value or "proveedor"
+            es_propio = origen == "propio"
 
-            save_variante(prod_id, {
-                "color_id": color_id,
-                "talla_id": talla_id,
-                "precio_unitario": precio,
-                "stock_actual": stock_val,
-                "stock_minimo": 0,
-                "precio_fabricacion": fabri_val,
-            })
+            for v in variantes_filtradas:
+                precio_venta = _parse_input_number(v["precio"].value or "0")
+                if precio_venta <= 0:
+                    _show_message("El precio venta debe ser mayor a 0 en todas las variantes.", t["accent"])
+                    return
 
-        _show_message(msg, ft.colors.GREEN_700)
-        if on_saved:
-            on_saved()
+            if editing_id["value"]:
+                update_producto(editing_id["value"], {
+                    "detalle": detalle,
+                    "precio_unitario": 0,
+                    "stock_actual": 0,
+                    "stock_minimo": 0,
+                    "tipo_origen": origen,
+                })
+                prod_id = editing_id["value"]
+                existing = get_variantes_by_producto(prod_id)
+                for v in existing:
+                    desactivar_variante(v["id"])
+                msg = f"Articulo '{detalle}' actualizado."
+            else:
+                prod_id = save_producto({
+                    "detalle": detalle,
+                    "precio_unitario": 0,
+                    "stock_actual": 0,
+                    "stock_minimo": 0,
+                    "tipo_origen": origen,
+                })
+                msg = f"Articulo '{detalle}' creado."
+
+            fabri_val = _parse_input_number(tf_fabri_default.value or "0") if es_propio else 0
+            stock_val = _parse_input_number(tf_stock_default.value or "0") if es_propio else 0
+
+            for v in variantes_filtradas:
+                color_id = int(v["color"].value) if v["color"].value and v["color"].value != "" else None
+                talla_id = int(v["talla"].value) if v["talla"].value and v["talla"].value != "" else None
+                precio = _parse_input_number(v["precio"].value or "0")
+
+                save_variante(prod_id, {
+                    "color_id": color_id,
+                    "talla_id": talla_id,
+                    "precio_unitario": precio,
+                    "stock_actual": stock_val,
+                    "stock_minimo": 0,
+                    "precio_fabricacion": fabri_val,
+                })
+
+            _show_message(msg, ft.Colors.GREEN_700)
+            if on_saved:
+                on_saved()
+        except Exception as ex:
+            tb = traceback.format_exc()
+            print(f"\n=== DEBUG NUEVO PRODUCTO ERROR ===")
+            print(f"Error: {ex}")
+            print(f"Tipo: {type(ex).__name__}")
+            print(f"Traceback:\n{tb}")
+            print("==================================\n")
+            log.error(f"Error al guardar producto: {ex}", exc_info=True)
+            _show_message(f"Error: {ex}", ft.Colors.RED_600)
 
     # ── Populate if editing ──
     if producto:
