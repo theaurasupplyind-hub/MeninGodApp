@@ -151,10 +151,6 @@ def main(page: ft.Page):
                 pass
         page.update()
 
-    def _on_estado_changed(factura_id: int, nuevo_estado: str):
-        log.debug(f"Estado cambiado: factura_id={factura_id} → {nuevo_estado}")
-        _refresh_dashboard()
-
     def _build_view(idx: int) -> ft.Control:
         log.debug(f"_build_view({idx})")
         if idx == 0:
@@ -162,7 +158,6 @@ def main(page: ft.Page):
                 page,
                 on_nueva_factura=lambda e: _switch(1),
                 on_refresh=lambda e: _refresh_dashboard(),
-                on_estado_changed=_on_estado_changed,
                 on_switch_tab=_switch,
                 on_toggle_fullscreen=_toggle_fullscreen,
             )

@@ -2,7 +2,7 @@ from datetime import datetime
 
 import flet as ft
 
-from db.database import get_facturas, get_stats, update_factura_estado, update_factura_envio, get_connection
+from db.database import get_facturas, get_stats, update_factura_envio, get_connection
 from db.database import registrar_cobro_factura, get_cliente_by_nombre, get_actividad_reciente, get_actividad_reciente_days
 from theme import get_theme
 
@@ -51,70 +51,16 @@ def _metric_card(
     )
 
 
-def _estado_toggle(page: ft.Page, factura_id: int, factura: dict, estado_inicial: str, on_estado_changed=None):
-    """Toggle Pendiente ↔ Pagado."""
-
+def _estado_toggle(page: ft.Page, estado_inicial: str):
+    """Badge informativo de estado (solo lectura)."""
     val = estado_inicial if estado_inicial in ("Pendiente", "Pagado") else "Pendiente"
     bg, fg = _get_estado_colors(val, page)
-
     label = ft.Text(val, size=11, color=fg, weight=ft.FontWeight.W_500)
-
     badge = ft.Container(
         content=ft.Row([label], spacing=2, tight=True),
         bgcolor=bg, border_radius=20,
         padding=ft.padding.symmetric(3, 8),
-        tooltip="Click para cambiar estado",
-        ink=True,
     )
-
-    def on_click(e):
-        nuevo = "Pagado" if label.value == "Pendiente" else "Pendiente"
-        label.value = nuevo
-        new_bg, new_fg = _get_estado_colors(nuevo, page)
-        label.color = new_fg
-        badge.bgcolor = new_bg
-        badge.update()
-
-        db_estado_previo = None
-        try:
-            conn = get_connection()
-            c = conn.cursor()
-            c.execute("SELECT estado FROM facturas WHERE id = ?", (factura_id,))
-            row = c.fetchone()
-            db_estado_previo = row["estado"] if row else None
-            conn.close()
-        except Exception:
-            pass
-
-        try:
-            update_factura_estado(factura_id, nuevo)
-        except Exception as ex:
-            print(f"[dashboard] Error al actualizar estado: {ex}")
-
-        if nuevo == "Pagado" and db_estado_previo != "Pagado":
-            try:
-                total = factura.get("total", 0)
-                cliente_nombre = factura.get("cliente_nombre", "")
-                numero = factura.get("numero", "")
-                cliente = get_cliente_by_nombre(cliente_nombre)
-                cliente_id = cliente["id"] if cliente else None
-                if total > 0:
-                    registrar_cobro_factura(
-                        factura_id=factura_id,
-                        numero_factura=numero,
-                        cliente_id=cliente_id,
-                        cliente_nombre=cliente_nombre,
-                        monto=total,
-                        medio_pago="Efectivo",
-                        nota="Cobro directo desde Dashboard",
-                    )
-            except Exception as ex:
-                print(f"[dashboard] Error al registrar cobro: {ex}")
-
-        if on_estado_changed:
-            on_estado_changed(factura_id, nuevo)
-
-    badge.on_click = on_click
     return badge
 
 
@@ -257,7 +203,7 @@ def _cobro_button(page: ft.Page, factura: dict, on_cobro=None):
 
 from views.flow_guide import HelpButton
 
-def DashboardView(page: ft.Page, on_nueva_factura=None, on_refresh=None, on_estado_changed=None, on_switch_tab=None, on_toggle_fullscreen=None):
+def DashboardView(page: ft.Page, on_nueva_factura=None, on_refresh=None, on_switch_tab=None, on_toggle_fullscreen=None):
     t = get_theme(page)
     MOV_MAX = 100
     _show_all: dict[str, bool] = {"value": False}
@@ -309,10 +255,7 @@ def DashboardView(page: ft.Page, on_nueva_factura=None, on_refresh=None, on_esta
                         ft.DataCell(
                             _estado_toggle(
                                 page,
-                                factura_id=factura["id"],
-                                factura=factura,
                                 estado_inicial=estado_actual,
-                                on_estado_changed=on_estado_changed,
                             )
                         ),
                         ft.DataCell(
