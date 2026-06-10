@@ -491,17 +491,25 @@ def main(page: ft.Page):
 
     # ── Login / logout helpers ────────────────────────────────────────────────
     def _on_login_success():
+        print("[login] _on_login_success: overlay.visible=False, switching to Dashboard")
         overlay.visible = False
         _update_profile()
+        try:
+            _switch(0)
+        except Exception as ex:
+            print(f"[login] Error en _switch(0): {ex}")
         page.update()
 
     def _open_login_dialog():
         import asyncio
         users = get_usuarios()
+        print(f"[main] _open_login_dialog — usuarios encontrados: {len(users)}")
         if not users:
+            print(f"[main] No hay usuarios → abriendo RegisterDialog")
             dlg = RegisterDialog(page, on_success=_on_login_success)
             page.open(dlg)
         else:
+            print(f"[main] Hay usuarios → abriendo LoginDialog")
             dlg = LoginDialog(page, on_success=_on_login_success)
             page.open(dlg)
             async def _focus():

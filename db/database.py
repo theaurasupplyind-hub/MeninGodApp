@@ -754,6 +754,8 @@ def procesar_stock_factura(numero_factura: str, cliente_nombre: str, items: list
     c = conn.cursor()
 
     for item in items:
+        if item.get("curva_color_ids"):
+            continue
         detalle = (item.get("detalle") or "").strip()
         cantidad_pedida = float(item.get("cantidad", 0) or 0)
         if not detalle or cantidad_pedida <= 0:
@@ -808,7 +810,7 @@ def revertir_stock_factura(numero_factura: str):
     conn.close()
 
 
-def procesar_stock_curva_color(numero_factura: str, items_controls: list) -> None:
+def procesar_stock_curva_color(items_controls: list) -> None:
     """Deduct variant stock for per-color curva items after saving."""
     conn = get_connection()
     c = conn.cursor()
@@ -2011,6 +2013,7 @@ def get_usuarios() -> list:
     c.execute("SELECT id, nombre, created_at FROM usuarios ORDER BY id")
     rows = [dict(r) for r in c.fetchall()]
     conn.close()
+    print(f"[DB] get_usuarios → {len(rows)} usuario(s): {[r['nombre'] for r in rows]}")
     return rows
 
 
@@ -2037,6 +2040,10 @@ def verificar_pin(nombre: str, pin: str) -> dict | None:
     c.execute("SELECT * FROM usuarios WHERE nombre = ? AND pin = ?", (nombre, pin))
     row = c.fetchone()
     conn.close()
+    if row:
+        print(f"[DB] verificar_pin('{nombre}', '****') → OK (id={row['id']})")
+    else:
+        print(f"[DB] verificar_pin('{nombre}', '****') → NO MATCH")
     return dict(row) if row else None
 
 
@@ -2048,6 +2055,7 @@ def registrar_sesion(usuario_id: int) -> str:
     c.execute("INSERT INTO sesiones (id, usuario_id, inicio) VALUES (?,?, datetime('now','localtime'))", (session_id, usuario_id))
     conn.commit()
     conn.close()
+    print(f"[DB] registrar_sesion(usuario_id={usuario_id}) → session_id={session_id}")
     return session_id
 
 
@@ -2156,6 +2164,16 @@ def delete_factura(numero: str):
                 "UPDATE productos SET stock_actual = MAX(0, COALESCE(stock_actual,0) + ?) WHERE id = ?",
                 (item["cantidad"], pid)
             )
+        cci = item.get("curva_color_ids")
+        if cci:
+            cantidad = float(item["cantidad"] or 0)
+            for vid in cci.split(","):
+                vid = vid.strip()
+                if vid:
+                    c.execute(
+                        "UPDATE variantes SET stock_actual = COALESCE(stock_actual,0) + ? WHERE id = ?",
+                        (cantidad, int(vid))
+                    )
     c.execute("DELETE FROM factura_items WHERE factura_id = ?", (factura["id"],))
     c.execute("DELETE FROM facturas WHERE id = ?", (factura["id"],))
     conn.commit()

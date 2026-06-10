@@ -40,11 +40,15 @@ class AuthService:
 
     def login(self, nombre: str, pin: str) -> dict | None:
         """Verifica credenciales y crea sesión. Retorna usuario dict o None."""
+        print(f"[AuthService] login('{nombre}', '****') — verificando PIN...")
         u = verificar_pin(nombre, pin)
         if not u:
+            print(f"[AuthService] login falló: PIN incorrecto o usuario no encontrado")
             return None
+        print(f"[AuthService] PIN OK → usuario={u.get('nombre')} id={u.get('id')}, creando sesión...")
         self._user = u
         self._session_id = registrar_sesion(u["id"])
+        print(f"[AuthService] Sesión creada: {self._session_id}")
         return u
 
     def register(self, nombre: str, pin: str) -> tuple[bool, str]:

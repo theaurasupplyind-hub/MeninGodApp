@@ -72,16 +72,21 @@ def LoginDialog(page: ft.Page, on_success=None) -> ft.AlertDialog:
 
     def _do_login(e):
         error_text.value = ""
+        print(f"[LoginDialog] _do_login — nombre='{tf_nombre.value}' pin='{'*'*len(tf_pin.value or '')}'")
         u = auth.login(tf_nombre.value or "", tf_pin.value or "")
+        print(f"[LoginDialog] auth.login retornó: {u}")
         if u:
+            print(f"[LoginDialog] Login exitoso, cerrando diálogo...")
             if cb_recordar.value:
                 _save_remembered(tf_nombre.value.strip())
             else:
                 _clear_remembered()
             page.close(dlg)
             if on_success:
+                print(f"[LoginDialog] Llamando on_success...")
                 on_success()
         else:
+            print(f"[LoginDialog] Login falló")
             error_text.value = "Usuario o PIN incorrecto. ¿Querés registrarte?"
             page.update()
 
